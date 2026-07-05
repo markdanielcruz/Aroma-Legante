@@ -1,5 +1,5 @@
 """
-Perfume Business Inventory & Sales Manager
+Aroma Legante — Inventory & Sales Manager
 --------------------------------------------
 A single-file Streamlit app backed by a local SQLite database.
 
@@ -20,8 +20,109 @@ import streamlit as st
 
 DB_PATH = "perfume_inventory.db"
 CURRENCY = "₱"
+APP_NAME = "Aroma Legante"
 
-st.set_page_config(page_title="Perfume Inventory Manager", page_icon="🌸", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="🌸", layout="wide")
+
+# ============================================================
+# LOOK & FEEL
+# ============================================================
+
+CUSTOM_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Lato:wght@400;500;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Lato', sans-serif;
+    font-size: 16.5px;
+}
+
+h1, h2, h3 {
+    font-family: 'Playfair Display', Georgia, serif !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.3px;
+    color: #3B2A2A !important;
+}
+
+h1 {
+    font-size: 2.35rem !important;
+    border-bottom: 2px solid #E7C9C2;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.3rem !important;
+}
+
+h2, h3 {
+    margin-top: 1.1rem !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 1.55rem;
+    color: #A8576B;
+    font-weight: 700;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.95rem;
+    color: #6B5555;
+}
+
+[data-testid="stMetric"] {
+    background-color: #F8ECE8;
+    border-radius: 14px;
+    padding: 16px 18px;
+    border: 1px solid #EEDAD3;
+}
+
+section[data-testid="stSidebar"] {
+    background-color: #FBF3F0;
+    border-right: 1px solid #EFDDD7;
+}
+
+section[data-testid="stSidebar"] h1 {
+    font-size: 1.55rem !important;
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0.2rem !important;
+}
+
+.stDataFrame, .stTable {
+    font-size: 1.03rem;
+}
+
+div.stButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+    border: 1px solid #D9A9A6;
+}
+
+div.stButton > button[kind="primary"] {
+    background-color: #A8576B;
+    border: none;
+}
+
+div.stButton > button[kind="primary"]:hover {
+    background-color: #8F4459;
+}
+
+div.stDownloadButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+hr, [data-testid="stDivider"] {
+    border-color: #EEDAD3 !important;
+}
+
+.brand-caption {
+    color: #8A7370;
+    font-size: 0.85rem;
+    margin-top: -8px;
+    margin-bottom: 18px;
+    letter-spacing: 0.5px;
+}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -82,9 +183,27 @@ def init_db():
             FOREIGN KEY (item_id) REFERENCES items(id)
         )"""
     )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            date_added TEXT
+        )"""
+    )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS customer_prices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            price REAL NOT NULL,
+            UNIQUE(customer_id, item_id),
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (item_id) REFERENCES items(id)
+        )"""
+    )
     conn.commit()
 
-    # Seed with the items visible in the user's existing tracker, only once
+    # Seed with the items visible in the user's original tracker, only once
     c.execute("SELECT COUNT(*) FROM items")
     if c.fetchone()[0] == 0:
         seed = [
@@ -106,6 +225,16 @@ def init_db():
                 (name, um, cost, stock, today),
             )
         conn.commit()
+
+    # Backfill a customers directory from any sales already on file (safe to run every start)
+    c.execute("SELECT DISTINCT customer_name FROM sales")
+    for (nm,) in c.fetchall():
+        if nm and nm.strip():
+            c.execute(
+                "INSERT OR IGNORE INTO customers (name, date_added) VALUES (?, ?)",
+                (nm.strip(), date.today().isoformat()),
+            )
+    conn.commit()
     conn.close()
 
 
@@ -146,8 +275,9 @@ def delete_item(item_id):
     has_sales = c.fetchone()[0] > 0
     if has_sales:
         conn.close()
-        return False, "This item has sales history and can't be deleted (to keep your records intact). You can rename its cost/price instead, or set its stock to 0."
+        return False, "This item has sales history and can't be deleted (to keep your records intact). You can set its stock to 0 instead."
     c.execute("DELETE FROM stock_movements WHERE item_id=?", (item_id,))
+    c.execute("DELETE FROM customer_prices WHERE item_id=?", (item_id,))
     c.execute("DELETE FROM items WHERE id=?", (item_id,))
     conn.commit()
     conn.close()
@@ -178,6 +308,92 @@ def get_movements_df():
                   m.quantity AS Quantity, m.reason AS Reason
            FROM stock_movements m JOIN items i ON m.item_id = i.id
            ORDER BY m.move_date DESC, m.id DESC""",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+# ---------- customers ----------
+
+def get_customers_df():
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT * FROM customers ORDER BY name", conn)
+    conn.close()
+    return df
+
+
+def get_or_create_customer(name):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id FROM customers WHERE name = ?", (name,))
+    row = c.fetchone()
+    if row:
+        cid = row[0]
+    else:
+        c.execute("INSERT INTO customers (name, date_added) VALUES (?, ?)", (name, date.today().isoformat()))
+        conn.commit()
+        cid = c.lastrowid
+    conn.close()
+    return cid
+
+
+def get_customer_price(customer_id, item_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT price FROM customer_prices WHERE customer_id=? AND item_id=?", (customer_id, item_id))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def upsert_customer_price(customer_id, item_id, price):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        """INSERT INTO customer_prices (customer_id, item_id, price) VALUES (?, ?, ?)
+           ON CONFLICT(customer_id, item_id) DO UPDATE SET price=excluded.price""",
+        (customer_id, item_id, price),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_customer_price(price_id):
+    conn = get_conn()
+    conn.execute("DELETE FROM customer_prices WHERE id=?", (price_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_customer_prices_df(customer_id):
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT cp.id, i.name AS Item, cp.price AS Price
+           FROM customer_prices cp JOIN items i ON cp.item_id = i.id
+           WHERE cp.customer_id = ?
+           ORDER BY i.name""",
+        conn,
+        params=(customer_id,),
+    )
+    conn.close()
+    return df
+
+
+def get_customer_summary_df():
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT c.id AS CustomerID, c.name AS Name,
+                  COUNT(DISTINCT s.id) AS Purchases,
+                  COALESCE(SUM(si.quantity*si.unit_price), 0) AS TotalSpent,
+                  COALESCE(SUM(CASE WHEN s.payment_status='Paid' THEN si.quantity*si.unit_price ELSE 0 END), 0) AS Paid,
+                  COALESCE(SUM(CASE WHEN s.payment_status='Unpaid' THEN si.quantity*si.unit_price ELSE 0 END), 0) AS Outstanding,
+                  MAX(s.sale_date) AS LastPurchase
+           FROM customers c
+           LEFT JOIN sales s ON s.customer_name = c.name
+           LEFT JOIN sale_items si ON si.sale_id = s.id
+           GROUP BY c.id
+           ORDER BY c.name""",
         conn,
     )
     conn.close()
@@ -266,6 +482,8 @@ def peso(x):
         return f"{CURRENCY}0.00"
 
 
+NEW_CUSTOMER_LABEL = "➕ Add a new customer..."
+
 init_db()
 
 
@@ -273,10 +491,12 @@ init_db()
 # SIDEBAR NAVIGATION
 # ============================================================
 
-st.sidebar.title("🌸 Perfume Biz")
+st.sidebar.markdown(f"# 🌸 {APP_NAME}")
+st.sidebar.markdown('<div class="brand-caption">INVENTORY &amp; SALES</div>', unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Go to",
-    ["Dashboard", "Inventory", "Stock In / Out", "Record a Sale", "Sales & Payments", "Manage Items"],
+    ["Dashboard", "Inventory", "Stock In / Out", "Record a Sale", "Sales & Payments", "Customers", "Manage Items"],
+    label_visibility="collapsed",
 )
 
 items_df = get_items_df()
@@ -296,27 +516,29 @@ if page == "Dashboard":
         total_units = items_df["current_stock"].sum()
         stock_value_cost = (items_df["current_stock"] * items_df["unit_cost"]).sum()
         stock_value_retail = (items_df["current_stock"] * items_df["selling_price"]).sum()
+        total_customers = len(get_customers_df())
 
         sales_df = get_sales_summary_df()
         realized_profit = sales_df.loc[sales_df["Status"] == "Paid", "Profit"].sum() if not sales_df.empty else 0
         pending_profit = sales_df.loc[sales_df["Status"] == "Unpaid", "Profit"].sum() if not sales_df.empty else 0
         outstanding_payables = sales_df.loc[sales_df["Status"] == "Unpaid", "Total"].sum() if not sales_df.empty else 0
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Items tracked", total_items)
-        c2.metric("Total units in stock", f"{total_units:,.0f}")
-        c3.metric("Stock value (at cost)", peso(stock_value_cost))
-        c4.metric("Stock value (at retail)", peso(stock_value_retail))
+        c2.metric("Units in stock", f"{total_units:,.0f}")
+        c3.metric("Stock value (cost)", peso(stock_value_cost))
+        c4.metric("Stock value (retail)", peso(stock_value_retail))
+        c5.metric("Customers", total_customers)
 
-        c5, c6, c7 = st.columns(3)
-        c5.metric("Profit earned (paid sales)", peso(realized_profit))
-        c6.metric("Profit pending (unpaid sales)", peso(pending_profit))
-        c7.metric("Outstanding payables", peso(outstanding_payables))
+        c6, c7, c8 = st.columns(3)
+        c6.metric("Profit earned (paid)", peso(realized_profit))
+        c7.metric("Profit pending (unpaid)", peso(pending_profit))
+        c8.metric("Outstanding payables", peso(outstanding_payables))
 
         st.divider()
 
         low_stock = items_df[items_df["current_stock"] <= items_df["low_stock_threshold"]]
-        st.subheader("⚠️ Low stock alerts")
+        st.subheader("⚠️ Low stock")
         if low_stock.empty:
             st.success("All items are above their low-stock threshold.")
         else:
@@ -351,7 +573,9 @@ elif page == "Inventory":
             lambda r: (r["margin"] / r["selling_price"] * 100) if r["selling_price"] > 0 else 0, axis=1
         )
         view["stock_value"] = view["current_stock"] * view["unit_cost"]
-        view["low"] = view["current_stock"] <= view["low_stock_threshold"]
+        view["Status"] = view.apply(
+            lambda r: "🟠 Low stock" if r["current_stock"] <= r["low_stock_threshold"] else "🟢 In stock", axis=1
+        )
 
         display = view.rename(
             columns={
@@ -364,27 +588,23 @@ elif page == "Inventory":
                 "margin_pct": "Margin %",
                 "stock_value": "Stock Value (cost)",
             }
-        )[["Item", "Unit", "Cost", "Selling Price", "Profit/Unit", "Margin %", "In Stock", "Stock Value (cost)", "low"]]
+        )[["Item", "Unit", "Cost", "Selling Price", "Profit/Unit", "Margin %", "In Stock", "Stock Value (cost)", "Status"]]
 
-        def highlight_low(row):
-            color = "background-color: #ffe3e3" if row["low"] else ""
-            return [color] * len(row)
-
-        styled = display.drop(columns=["low"]).style.apply(
-            lambda _: ["background-color: #ffe3e3" if low else "" for low in display["low"]], axis=0
+        st.dataframe(
+            display,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Cost": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f"),
+                "Selling Price": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f"),
+                "Profit/Unit": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f"),
+                "Margin %": st.column_config.NumberColumn(format="%.0f%%"),
+                "Stock Value (cost)": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f"),
+            },
         )
-        fmt = {
-            "Cost": lambda x: peso(x),
-            "Selling Price": lambda x: peso(x),
-            "Profit/Unit": lambda x: peso(x),
-            "Margin %": lambda x: f"{x:.0f}%",
-            "Stock Value (cost)": lambda x: peso(x),
-        }
-        styled = styled.format(fmt)
-        st.dataframe(styled, hide_index=True, use_container_width=True)
-        st.caption("Rows highlighted in red are at or below their low-stock threshold.")
+        st.caption("🟠 means the item is at or below its low-stock threshold.")
 
-        csv = display.drop(columns=["low"]).to_csv(index=False).encode("utf-8")
+        csv = display.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Download inventory as CSV", csv, "inventory.csv", "text/csv")
 
 
@@ -444,38 +664,63 @@ elif page == "Record a Sale":
     if items_df.empty:
         st.info("Add items first under **Manage Items**.")
     else:
+        customers_df = get_customers_df()
+        existing_names = customers_df["name"].tolist()
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            customer_name = st.text_input("Customer name", placeholder="e.g. Bimby")
+            pick = st.selectbox("Customer", existing_names + [NEW_CUSTOMER_LABEL])
+            if pick == NEW_CUSTOMER_LABEL:
+                customer_name = st.text_input("New customer's name", placeholder="e.g. Bimby").strip()
+            else:
+                customer_name = pick
         with col2:
             sale_date = st.date_input("Date", value=date.today())
         with col3:
             payment_status = st.radio("Payment status", ["Paid", "Unpaid"], horizontal=True)
 
-        st.markdown("**Items purchased** — enter quantity for each item being bought:")
+        existing_customer_id = None
+        if customer_name and customer_name in existing_names:
+            existing_customer_id = int(customers_df.loc[customers_df["name"] == customer_name, "id"].iloc[0])
+
+        st.markdown("**Items purchased** — enter quantity for each item being bought. Prices can be adjusted per customer.")
 
         editor_source = items_df[["id", "name", "current_stock", "selling_price", "unit_cost"]].copy()
-        editor_source["Quantity"] = 0
-        editor_display = editor_source.rename(
-            columns={"name": "Item", "current_stock": "Available", "selling_price": "Unit Price"}
-        )[["Item", "Available", "Unit Price", "Quantity"]]
 
+        def _default_price(row):
+            if existing_customer_id is not None:
+                custom = get_customer_price(existing_customer_id, int(row["id"]))
+                if custom is not None:
+                    return custom
+            return row["selling_price"]
+
+        editor_source["Unit Price"] = editor_source.apply(_default_price, axis=1)
+        editor_source["Quantity"] = 0
+        editor_display = editor_source.rename(columns={"name": "Item", "current_stock": "Available"})[
+            ["Item", "Available", "Unit Price", "Quantity"]
+        ]
+
+        editor_key = f"sale_editor_{customer_name or 'unset'}"
         edited = st.data_editor(
             editor_display,
             column_config={
                 "Item": st.column_config.TextColumn(disabled=True),
                 "Available": st.column_config.NumberColumn(disabled=True),
-                "Unit Price": st.column_config.NumberColumn(disabled=True, format=f"{CURRENCY}%.2f"),
+                "Unit Price": st.column_config.NumberColumn(min_value=0.0, step=1.0, format=f"{CURRENCY}%.2f"),
                 "Quantity": st.column_config.NumberColumn(min_value=0, step=1),
             },
             hide_index=True,
             use_container_width=True,
-            key="sale_editor",
+            key=editor_key,
         )
 
         note = st.text_input("Note (optional)", placeholder="e.g. picked up personally, half payment, etc.")
+        remember_prices = st.checkbox(
+            f"💾 Remember these prices as {customer_name or 'this customer'}'s usual pricing",
+            value=True,
+            disabled=not bool(customer_name),
+        )
 
-        # live preview of total & profit
         chosen = edited[edited["Quantity"] > 0]
         if not chosen.empty:
             preview_rows = []
@@ -483,8 +728,8 @@ elif page == "Record a Sale":
             profit = 0.0
             for _, row in chosen.iterrows():
                 src = items_df[items_df["name"] == row["Item"]].iloc[0]
-                line_total = row["Quantity"] * src["selling_price"]
-                line_profit = row["Quantity"] * (src["selling_price"] - src["unit_cost"])
+                line_total = row["Quantity"] * row["Unit Price"]
+                line_profit = row["Quantity"] * (row["Unit Price"] - src["unit_cost"])
                 total += line_total
                 profit += line_profit
                 preview_rows.append(
@@ -496,18 +741,19 @@ elif page == "Record a Sale":
             pc2.metric("Profit on this sale", peso(profit))
 
         if st.button("✅ Confirm & Save Sale", type="primary"):
-            if not customer_name.strip():
-                st.error("Please enter a customer name.")
+            if not customer_name:
+                st.error("Please choose or enter a customer name.")
             elif chosen.empty:
                 st.error("Please enter a quantity for at least one item.")
             else:
-                # validate stock
                 problems = []
                 line_items = []
                 for _, row in chosen.iterrows():
                     src = items_df[items_df["name"] == row["Item"]].iloc[0]
                     if row["Quantity"] > src["current_stock"]:
                         problems.append(f"{row['Item']}: only {src['current_stock']:.0f} in stock")
+                    elif row["Unit Price"] < 0:
+                        problems.append(f"{row['Item']}: price can't be negative")
                     else:
                         line_items.append(
                             {
@@ -515,14 +761,18 @@ elif page == "Record a Sale":
                                 "item_name": src["name"],
                                 "quantity": float(row["Quantity"]),
                                 "unit_cost": float(src["unit_cost"]),
-                                "unit_price": float(src["selling_price"]),
+                                "unit_price": float(row["Unit Price"]),
                             }
                         )
                 if problems:
-                    st.error("Not enough stock for: " + "; ".join(problems))
+                    st.error("Please check: " + "; ".join(problems))
                 else:
-                    record_sale(customer_name.strip(), sale_date.isoformat(), payment_status, note, line_items)
-                    st.success(f"Sale recorded for {customer_name.strip()}!")
+                    cust_id = get_or_create_customer(customer_name)
+                    record_sale(customer_name, sale_date.isoformat(), payment_status, note, line_items)
+                    if remember_prices:
+                        for li in line_items:
+                            upsert_customer_price(cust_id, li["item_id"], li["unit_price"])
+                    st.success(f"Sale recorded for {customer_name}!")
                     st.rerun()
 
 
@@ -597,6 +847,60 @@ elif page == "Sales & Payments":
 
 
 # ============================================================
+# CUSTOMERS
+# ============================================================
+
+elif page == "Customers":
+    st.title("👥 Customers")
+
+    customers_df = get_customers_df()
+    if customers_df.empty:
+        st.info("No customers yet — they're added automatically the first time you record a sale for them.")
+    else:
+        summary = get_customer_summary_df()
+        show = summary.drop(columns=["CustomerID"]).rename(
+            columns={"Purchases": "Purchases", "TotalSpent": "Total Spent", "Paid": "Paid", "Outstanding": "Outstanding", "LastPurchase": "Last Purchase"}
+        )
+        show["Total Spent"] = show["Total Spent"].map(peso)
+        show["Paid"] = show["Paid"].map(peso)
+        show["Outstanding"] = show["Outstanding"].map(peso)
+        show["Last Purchase"] = show["Last Purchase"].fillna("—")
+        st.dataframe(show, hide_index=True, use_container_width=True)
+
+        st.divider()
+        pick = st.selectbox("View a customer's details", customers_df["name"].tolist())
+        cust_id = int(customers_df.loc[customers_df["name"] == pick, "id"].iloc[0])
+
+        st.subheader(f"Purchase history — {pick}")
+        sales_df = get_sales_summary_df()
+        hist = sales_df[sales_df["Customer"] == pick].drop(columns=["Customer"]).copy()
+        if hist.empty:
+            st.caption("No purchases recorded yet.")
+        else:
+            hist["Total"] = hist["Total"].map(peso)
+            hist["Profit"] = hist["Profit"].map(peso)
+            st.dataframe(hist, hide_index=True, use_container_width=True)
+
+        st.subheader(f"Saved prices for {pick}")
+        prices_df = get_customer_prices_df(cust_id)
+        if prices_df.empty:
+            st.caption("No custom prices saved yet — prices are remembered automatically after a sale.")
+        else:
+            pcol1, pcol2 = st.columns([3, 1])
+            with pcol1:
+                display_prices = prices_df[["Item", "Price"]].copy()
+                display_prices["Price"] = display_prices["Price"].map(peso)
+                st.dataframe(display_prices, hide_index=True, use_container_width=True)
+            with pcol2:
+                remove_item = st.selectbox("Reset an item's price", prices_df["Item"].tolist(), key="reset_price_pick")
+                if st.button("Reset to default price"):
+                    row_id = int(prices_df.loc[prices_df["Item"] == remove_item, "id"].iloc[0])
+                    delete_customer_price(row_id)
+                    st.success(f"{remove_item}'s price for {pick} reset to the standard price.")
+                    st.rerun()
+
+
+# ============================================================
 # MANAGE ITEMS
 # ============================================================
 
@@ -650,6 +954,7 @@ elif page == "Manage Items":
                     "Low-stock threshold", min_value=0.0, step=1.0, value=float(row["low_stock_threshold"])
                 )
                 st.caption(f"Current stock: {row['current_stock']:.0f} — adjust this from the **Stock In / Out** page.")
+                st.caption("This is the standard/default selling price. Individual customers can still be charged differently on the Record a Sale page.")
                 save = st.form_submit_button("Save changes", type="primary")
                 if save:
                     update_item(int(row["id"]), unit_measure, unit_cost, selling_price, threshold)
