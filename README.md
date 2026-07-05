@@ -22,12 +22,30 @@ that sits next to `app.py`. As long as you keep that file, everything will
 still be there next time you run the app — just don't delete it. Back it up
 occasionally with the CSV download buttons (e.g. copy it to a cloud drive).
 
-## If the app ever looks dark or hard to read
+## If the app ever looks inconsistent (some parts light, some dark)
 
-The app forces a warm, light "boutique" look on purpose, but some browsers
-remember a personal dark-mode override. If that ever happens: click the
-**⋮ menu (top right)** → **Settings** → set **Theme** to **Light**. This is a
-one-time, per-browser setting.
+This usually means the hidden `.streamlit` folder didn't make it to GitHub —
+file managers on Windows and Mac often hide folders starting with a dot, so
+it's easy to drag-and-drop everything except that one.
+
+The easiest fix: on GitHub, click **Add file → Create new file**, and in the
+filename box type the full path **`.streamlit/config.toml`** (GitHub creates
+the folder automatically) — then paste in this content and commit:
+
+```toml
+[theme]
+base="dark"
+primaryColor="#C98A96"
+backgroundColor="#15110D"
+secondaryBackgroundColor="#221C18"
+textColor="#E7DED6"
+font="serif"
+```
+
+The app's own styling (fonts, colors, layout) is built directly into
+`app.py` so it always applies — but this config file is what makes tables
+and the data-entry grids match the same dark theme too, since those are
+drawn by a component that reads Streamlit's theme setting directly.
 
 ## What's inside
 

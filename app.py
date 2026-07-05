@@ -34,91 +34,115 @@ CUSTOM_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
 
-:root { color-scheme: light !important; }
+:root { color-scheme: dark !important; }
 
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stBottomBlockContainer"] {
-    background-color: #FAF6F3 !important;
+html, body, .stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+[data-testid="stBottomBlockContainer"],
+[data-testid="stMain"] {
+    background-color: #15110D !important;
 }
 [data-testid="stHeader"] { background-color: rgba(0,0,0,0) !important; }
 
 html, body, .stApp, [class*="css"] {
     font-family: 'Inter', sans-serif;
-    color: #2B2223;
+    color: #E7DED6;
 }
 
 [data-testid="stMarkdownContainer"] p,
 [data-testid="stMarkdownContainer"] li,
 [data-testid="stMarkdownContainer"] span,
-[data-testid="stCaptionContainer"] {
-    color: #2B2223 !important;
+[data-testid="stCaptionContainer"],
+label, .stSelectbox, .stTextInput, .stNumberInput, .stDateInput {
+    color: #E7DED6 !important;
 }
 
 h1, h2, h3 {
     font-family: 'Playfair Display', Georgia, serif !important;
     font-weight: 700 !important;
-    color: #5C2438 !important;
+    color: #D9A9B3 !important;
     letter-spacing: 0.2px;
 }
-
 h1 {
     font-size: 2.3rem !important;
-    border-bottom: 2px solid #E7CDC7;
+    border-bottom: 1px solid #3A2E28;
     padding-bottom: 0.5rem;
     margin-bottom: 1.3rem !important;
 }
 h2, h3 { margin-top: 1.1rem !important; }
 
-[data-testid="stMetricValue"] { color: #8C4A5C !important; font-weight: 700; font-size: 1.5rem; }
-[data-testid="stMetricLabel"] { color: #6B5555 !important; }
+/* Metric cards */
+[data-testid="stMetricValue"] { color: #D9A9B3 !important; font-weight: 700; font-size: 1.5rem; }
+[data-testid="stMetricLabel"] { color: #B8A99E !important; }
 [data-testid="stMetric"] {
-    background-color: #F3E5E1 !important;
+    background-color: #221C18 !important;
     border-radius: 14px;
     padding: 16px 18px;
-    border: 1px solid #E8D3CD;
+    border: 1px solid #3A2E28;
 }
 
+/* Sidebar */
 section[data-testid="stSidebar"] {
-    background-color: #F6EDE9 !important;
-    border-right: 1px solid #E8D3CD;
+    background-color: #1C1714 !important;
+    border-right: 1px solid #3A2E28;
 }
-section[data-testid="stSidebar"] * { color: #3B2A2A !important; }
+section[data-testid="stSidebar"] * { color: #E7DED6 !important; }
 section[data-testid="stSidebar"] h1 {
     font-size: 1.5rem !important;
     border-bottom: none;
     margin-bottom: 0 !important;
     padding-bottom: 0;
 }
-section[data-testid="stSidebar"] .brand-caption { color: #8A7370 !important; }
+section[data-testid="stSidebar"] .brand-caption { color: #9C8880 !important; }
 
-input[type="radio"] { accent-color: #8C4A5C; }
+input[type="radio"] { accent-color: #C98A96; }
 section[data-testid="stSidebar"] [role="radiogroup"] label {
     padding: 8px 10px;
     border-radius: 8px;
     margin-bottom: 2px;
 }
-section[data-testid="stSidebar"] [role="radiogroup"] label:hover { background-color: #EDD9D2; }
+section[data-testid="stSidebar"] [role="radiogroup"] label:hover { background-color: #241D19; }
 section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-    background-color: #E7C3BC;
+    background-color: #3A2E28;
     font-weight: 600;
 }
 
-.stDataFrame, .stTable { font-size: 1.0rem; }
+/* Alerts (info/success/error/warning) — one calm, consistent card style */
+[data-testid="stAlert"] {
+    background-color: #221C18 !important;
+    border: 1px solid #3A2E28 !important;
+}
+[data-testid="stAlert"] p, [data-testid="stAlert"] span { color: #E7DED6 !important; }
+
+/* Tables / editors — dark surround so there's no bright halo */
+[data-testid="stDataFrame"], [data-testid="stTable"] {
+    border: 1px solid #3A2E28;
+    border-radius: 8px;
+}
+
+/* Inputs */
+input, textarea, select, .stTextInput input, .stNumberInput input {
+    background-color: #221C18 !important;
+    color: #E7DED6 !important;
+    border-color: #3A2E28 !important;
+}
 
 div.stButton > button {
     border-radius: 8px;
     font-weight: 600;
     border: 1px solid #C98A96;
-    color: #5C2438;
-    background-color: #FFFFFF;
+    color: #E7DED6;
+    background-color: #221C18;
 }
-div.stButton > button[kind="primary"] { background-color: #8C4A5C; color: #FFFFFF !important; border: none; }
-div.stButton > button[kind="primary"]:hover { background-color: #73394A; }
+div.stButton > button[kind="primary"] { background-color: #C98A96; color: #171310 !important; border: none; }
+div.stButton > button[kind="primary"]:hover { background-color: #B87786; }
 div.stDownloadButton > button { border-radius: 8px; font-weight: 600; }
 
-hr, [data-testid="stDivider"] { border-color: #E8D3CD !important; }
+hr, [data-testid="stDivider"] { border-color: #3A2E28 !important; }
 
 .brand-caption {
-    color: #8A7370;
+    color: #9C8880;
     font-size: 0.82rem;
     margin-top: -6px;
     margin-bottom: 16px;
