@@ -25,100 +25,104 @@ APP_NAME = "Aroma Legante"
 st.set_page_config(page_title=APP_NAME, page_icon="🌸", layout="wide")
 
 # ============================================================
-# LOOK & FEEL
+# LOOK & FEEL — forced light, warm boutique palette
+# (explicitly overrides the viewer's light/dark setting so the
+#  app always looks the same, regardless of browser/system theme)
 # ============================================================
 
 CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Lato:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Lato', sans-serif;
-    font-size: 16.5px;
+:root { color-scheme: light !important; }
+
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stBottomBlockContainer"] {
+    background-color: #FAF6F3 !important;
+}
+[data-testid="stHeader"] { background-color: rgba(0,0,0,0) !important; }
+
+html, body, .stApp, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+    color: #2B2223;
+}
+
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span,
+[data-testid="stCaptionContainer"] {
+    color: #2B2223 !important;
 }
 
 h1, h2, h3 {
     font-family: 'Playfair Display', Georgia, serif !important;
     font-weight: 700 !important;
-    letter-spacing: 0.3px;
-    color: #3B2A2A !important;
+    color: #5C2438 !important;
+    letter-spacing: 0.2px;
 }
 
 h1 {
-    font-size: 2.35rem !important;
-    border-bottom: 2px solid #E7C9C2;
+    font-size: 2.3rem !important;
+    border-bottom: 2px solid #E7CDC7;
     padding-bottom: 0.5rem;
     margin-bottom: 1.3rem !important;
 }
+h2, h3 { margin-top: 1.1rem !important; }
 
-h2, h3 {
-    margin-top: 1.1rem !important;
-}
-
-[data-testid="stMetricValue"] {
-    font-size: 1.55rem;
-    color: #A8576B;
-    font-weight: 700;
-}
-
-[data-testid="stMetricLabel"] {
-    font-size: 0.95rem;
-    color: #6B5555;
-}
-
+[data-testid="stMetricValue"] { color: #8C4A5C !important; font-weight: 700; font-size: 1.5rem; }
+[data-testid="stMetricLabel"] { color: #6B5555 !important; }
 [data-testid="stMetric"] {
-    background-color: #F8ECE8;
+    background-color: #F3E5E1 !important;
     border-radius: 14px;
     padding: 16px 18px;
-    border: 1px solid #EEDAD3;
+    border: 1px solid #E8D3CD;
 }
 
 section[data-testid="stSidebar"] {
-    background-color: #FBF3F0;
-    border-right: 1px solid #EFDDD7;
+    background-color: #F6EDE9 !important;
+    border-right: 1px solid #E8D3CD;
 }
-
+section[data-testid="stSidebar"] * { color: #3B2A2A !important; }
 section[data-testid="stSidebar"] h1 {
-    font-size: 1.55rem !important;
+    font-size: 1.5rem !important;
     border-bottom: none;
+    margin-bottom: 0 !important;
     padding-bottom: 0;
-    margin-bottom: 0.2rem !important;
+}
+section[data-testid="stSidebar"] .brand-caption { color: #8A7370 !important; }
+
+input[type="radio"] { accent-color: #8C4A5C; }
+section[data-testid="stSidebar"] [role="radiogroup"] label {
+    padding: 8px 10px;
+    border-radius: 8px;
+    margin-bottom: 2px;
+}
+section[data-testid="stSidebar"] [role="radiogroup"] label:hover { background-color: #EDD9D2; }
+section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+    background-color: #E7C3BC;
+    font-weight: 600;
 }
 
-.stDataFrame, .stTable {
-    font-size: 1.03rem;
-}
+.stDataFrame, .stTable { font-size: 1.0rem; }
 
 div.stButton > button {
     border-radius: 8px;
     font-weight: 600;
-    border: 1px solid #D9A9A6;
+    border: 1px solid #C98A96;
+    color: #5C2438;
+    background-color: #FFFFFF;
 }
+div.stButton > button[kind="primary"] { background-color: #8C4A5C; color: #FFFFFF !important; border: none; }
+div.stButton > button[kind="primary"]:hover { background-color: #73394A; }
+div.stDownloadButton > button { border-radius: 8px; font-weight: 600; }
 
-div.stButton > button[kind="primary"] {
-    background-color: #A8576B;
-    border: none;
-}
-
-div.stButton > button[kind="primary"]:hover {
-    background-color: #8F4459;
-}
-
-div.stDownloadButton > button {
-    border-radius: 8px;
-    font-weight: 600;
-}
-
-hr, [data-testid="stDivider"] {
-    border-color: #EEDAD3 !important;
-}
+hr, [data-testid="stDivider"] { border-color: #E8D3CD !important; }
 
 .brand-caption {
     color: #8A7370;
-    font-size: 0.85rem;
-    margin-top: -8px;
-    margin-bottom: 18px;
-    letter-spacing: 0.5px;
+    font-size: 0.82rem;
+    margin-top: -6px;
+    margin-bottom: 16px;
+    letter-spacing: 1px;
 }
 </style>
 """
@@ -155,7 +159,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER NOT NULL,
             move_date TEXT NOT NULL,
-            movement_type TEXT NOT NULL,   -- 'In' or 'Out'
+            movement_type TEXT NOT NULL,
             quantity REAL NOT NULL,
             reason TEXT,
             FOREIGN KEY (item_id) REFERENCES items(id)
@@ -201,6 +205,25 @@ def init_db():
             FOREIGN KEY (item_id) REFERENCES items(id)
         )"""
     )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS cash_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            beginning_cash REAL NOT NULL DEFAULT 0,
+            start_date TEXT
+        )"""
+    )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS cash_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_date TEXT NOT NULL,
+            tx_type TEXT NOT NULL,      -- 'In' or 'Out'
+            category TEXT NOT NULL,
+            amount REAL NOT NULL,
+            note TEXT,
+            ref_type TEXT,              -- 'sale', 'stock_movement', 'manual'
+            ref_id INTEGER
+        )"""
+    )
     conn.commit()
 
     # Seed with the items visible in the user's original tracker, only once
@@ -234,6 +257,13 @@ def init_db():
                 "INSERT OR IGNORE INTO customers (name, date_added) VALUES (?, ?)",
                 (nm.strip(), date.today().isoformat()),
             )
+
+    c.execute("SELECT COUNT(*) FROM cash_settings")
+    if c.fetchone()[0] == 0:
+        c.execute(
+            "INSERT INTO cash_settings (id, beginning_cash, start_date) VALUES (1, 0, ?)",
+            (date.today().isoformat(),),
+        )
     conn.commit()
     conn.close()
 
@@ -286,19 +316,26 @@ def delete_item(item_id):
 
 # ---------- stock movements ----------
 
-def record_stock_movement(item_id, movement_type, quantity, reason, move_date):
+def record_stock_movement(item_id, item_name, movement_type, quantity, reason, move_date, cash_paid=None):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
         "INSERT INTO stock_movements (item_id, move_date, movement_type, quantity, reason) VALUES (?, ?, ?, ?, ?)",
         (item_id, move_date, movement_type, quantity, reason),
     )
+    move_id = c.lastrowid
     if movement_type == "In":
         c.execute("UPDATE items SET current_stock = current_stock + ? WHERE id=?", (quantity, item_id))
     else:
         c.execute("UPDATE items SET current_stock = current_stock - ? WHERE id=?", (quantity, item_id))
     conn.commit()
     conn.close()
+
+    if movement_type == "In" and cash_paid and cash_paid > 0:
+        add_cash_transaction(
+            move_date, "Out", "Stock Purchase", cash_paid,
+            f"Restock: {item_name} x{quantity:.0f}", ref_type="stock_movement", ref_id=move_id,
+        )
 
 
 def get_movements_df():
@@ -400,6 +437,92 @@ def get_customer_summary_df():
     return df
 
 
+# ---------- cash on hand ----------
+
+def get_beginning_cash():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT beginning_cash, start_date FROM cash_settings WHERE id=1")
+    row = c.fetchone()
+    conn.close()
+    return (row[0], row[1]) if row else (0.0, date.today().isoformat())
+
+
+def set_beginning_cash(amount, start_date):
+    conn = get_conn()
+    conn.execute("UPDATE cash_settings SET beginning_cash=?, start_date=? WHERE id=1", (amount, start_date))
+    conn.commit()
+    conn.close()
+
+
+def add_cash_transaction(tx_date, tx_type, category, amount, note="", ref_type=None, ref_id=None):
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO cash_transactions (tx_date, tx_type, category, amount, note, ref_type, ref_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (tx_date, tx_type, category, amount, note, ref_type, ref_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_cash_transaction(tx_id):
+    conn = get_conn()
+    conn.execute("DELETE FROM cash_transactions WHERE id=?", (tx_id,))
+    conn.commit()
+    conn.close()
+
+
+def remove_cash_tx_for_ref(ref_type, ref_id):
+    conn = get_conn()
+    conn.execute("DELETE FROM cash_transactions WHERE ref_type=? AND ref_id=?", (ref_type, ref_id))
+    conn.commit()
+    conn.close()
+
+
+def has_cash_tx_for_ref(ref_type, ref_id):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM cash_transactions WHERE ref_type=? AND ref_id=?", (ref_type, ref_id))
+    n = c.fetchone()[0]
+    conn.close()
+    return n > 0
+
+
+def get_cash_ledger_df():
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT id, tx_date AS Date, tx_type AS Type, category AS Category, amount AS Amount, note AS Note
+           FROM cash_transactions ORDER BY tx_date ASC, id ASC""",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def get_manual_cash_df():
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """SELECT id, tx_date AS Date, tx_type AS Type, category AS Category, amount AS Amount, note AS Note
+           FROM cash_transactions WHERE ref_type='manual' ORDER BY tx_date DESC, id DESC""",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def get_cash_balance():
+    beginning, _ = get_beginning_cash()
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COALESCE(SUM(amount),0) FROM cash_transactions WHERE tx_type='In'")
+    total_in = c.fetchone()[0]
+    c.execute("SELECT COALESCE(SUM(amount),0) FROM cash_transactions WHERE tx_type='Out'")
+    total_out = c.fetchone()[0]
+    conn.close()
+    return beginning + total_in - total_out, total_in, total_out
+
+
 # ---------- sales ----------
 
 def record_sale(customer_name, sale_date, payment_status, note, line_items):
@@ -411,6 +534,7 @@ def record_sale(customer_name, sale_date, payment_status, note, line_items):
         (customer_name, sale_date, payment_status, note),
     )
     sale_id = c.lastrowid
+    total = 0.0
     for li in line_items:
         c.execute(
             """INSERT INTO sale_items (sale_id, item_id, item_name, quantity, unit_cost, unit_price)
@@ -418,8 +542,13 @@ def record_sale(customer_name, sale_date, payment_status, note, line_items):
             (sale_id, li["item_id"], li["item_name"], li["quantity"], li["unit_cost"], li["unit_price"]),
         )
         c.execute("UPDATE items SET current_stock = current_stock - ? WHERE id=?", (li["quantity"], li["item_id"]))
+        total += li["quantity"] * li["unit_price"]
     conn.commit()
     conn.close()
+
+    if payment_status == "Paid" and total > 0:
+        add_cash_transaction(sale_date, "In", "Sale Payment", total, f"Sale to {customer_name}", ref_type="sale", ref_id=sale_id)
+
     return sale_id
 
 
@@ -452,13 +581,28 @@ def get_sale_line_items(sale_id):
 
 def update_payment_status(sale_id, status):
     conn = get_conn()
-    conn.execute("UPDATE sales SET payment_status=? WHERE id=?", (status, sale_id))
+    c = conn.cursor()
+    c.execute("UPDATE sales SET payment_status=? WHERE id=?", (status, sale_id))
     conn.commit()
     conn.close()
 
+    if status == "Paid":
+        if not has_cash_tx_for_ref("sale", sale_id):
+            conn2 = get_conn()
+            c2 = conn2.cursor()
+            c2.execute("SELECT sale_date, customer_name FROM sales WHERE id=?", (sale_id,))
+            sdate, cname = c2.fetchone()
+            c2.execute("SELECT COALESCE(SUM(quantity*unit_price),0) FROM sale_items WHERE sale_id=?", (sale_id,))
+            total = c2.fetchone()[0]
+            conn2.close()
+            if total > 0:
+                add_cash_transaction(sdate, "In", "Sale Payment", total, f"Sale to {cname}", ref_type="sale", ref_id=sale_id)
+    else:
+        remove_cash_tx_for_ref("sale", sale_id)
+
 
 def delete_sale(sale_id):
-    """Delete a sale and restore the stock it had taken out."""
+    """Delete a sale, restore the stock it had taken out, and remove any linked cash entry."""
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT item_id, quantity FROM sale_items WHERE sale_id=?", (sale_id,))
@@ -469,6 +613,7 @@ def delete_sale(sale_id):
     c.execute("DELETE FROM sales WHERE id=?", (sale_id,))
     conn.commit()
     conn.close()
+    remove_cash_tx_for_ref("sale", sale_id)
 
 
 # ============================================================
@@ -491,11 +636,11 @@ init_db()
 # SIDEBAR NAVIGATION
 # ============================================================
 
-st.sidebar.markdown(f"# 🌸 {APP_NAME}")
+st.sidebar.markdown(f"# {APP_NAME}")
 st.sidebar.markdown('<div class="brand-caption">INVENTORY &amp; SALES</div>', unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Go to",
-    ["Dashboard", "Inventory", "Stock In / Out", "Record a Sale", "Sales & Payments", "Customers", "Manage Items"],
+    ["Dashboard", "Inventory", "Stock In / Out", "Record a Sale", "Sales & Payments", "Customers", "Cash on Hand", "Manage Items"],
     label_visibility="collapsed",
 )
 
@@ -507,38 +652,42 @@ items_df = get_items_df()
 # ============================================================
 
 if page == "Dashboard":
-    st.title("📊 Dashboard")
+    st.title("Dashboard")
 
     if items_df.empty:
         st.info("No items yet — add your first perfume under **Manage Items**.")
     else:
+        cash_balance, cash_in, cash_out = get_cash_balance()
+        st.metric("💵 Cash on Hand", peso(cash_balance))
+        st.caption(f"₱{cash_in:,.2f} received and ₱{cash_out:,.2f} spent so far, on top of your beginning cash.")
+
+        st.divider()
+
         total_items = len(items_df)
         total_units = items_df["current_stock"].sum()
         stock_value_cost = (items_df["current_stock"] * items_df["unit_cost"]).sum()
-        stock_value_retail = (items_df["current_stock"] * items_df["selling_price"]).sum()
         total_customers = len(get_customers_df())
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Items tracked", total_items)
+        c2.metric("Units in stock", f"{total_units:,.0f}")
+        c3.metric("Stock value (cost)", peso(stock_value_cost))
+        c4.metric("Customers", total_customers)
 
         sales_df = get_sales_summary_df()
         realized_profit = sales_df.loc[sales_df["Status"] == "Paid", "Profit"].sum() if not sales_df.empty else 0
         pending_profit = sales_df.loc[sales_df["Status"] == "Unpaid", "Profit"].sum() if not sales_df.empty else 0
         outstanding_payables = sales_df.loc[sales_df["Status"] == "Unpaid", "Total"].sum() if not sales_df.empty else 0
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Items tracked", total_items)
-        c2.metric("Units in stock", f"{total_units:,.0f}")
-        c3.metric("Stock value (cost)", peso(stock_value_cost))
-        c4.metric("Stock value (retail)", peso(stock_value_retail))
-        c5.metric("Customers", total_customers)
-
-        c6, c7, c8 = st.columns(3)
-        c6.metric("Profit earned (paid)", peso(realized_profit))
-        c7.metric("Profit pending (unpaid)", peso(pending_profit))
-        c8.metric("Outstanding payables", peso(outstanding_payables))
+        c5, c6, c7 = st.columns(3)
+        c5.metric("Profit earned (paid)", peso(realized_profit))
+        c6.metric("Profit pending (unpaid)", peso(pending_profit))
+        c7.metric("Outstanding payables", peso(outstanding_payables))
 
         st.divider()
 
         low_stock = items_df[items_df["current_stock"] <= items_df["low_stock_threshold"]]
-        st.subheader("⚠️ Low stock")
+        st.subheader("Low stock")
         if low_stock.empty:
             st.success("All items are above their low-stock threshold.")
         else:
@@ -547,7 +696,7 @@ if page == "Dashboard":
             )
             st.dataframe(show, hide_index=True, use_container_width=True)
 
-        st.subheader("🕒 Recent sales")
+        st.subheader("Recent sales")
         if sales_df.empty:
             st.caption("No sales recorded yet.")
         else:
@@ -562,7 +711,7 @@ if page == "Dashboard":
 # ============================================================
 
 elif page == "Inventory":
-    st.title("📦 Inventory")
+    st.title("Inventory")
 
     if items_df.empty:
         st.info("No items yet — add your first perfume under **Manage Items**.")
@@ -613,7 +762,7 @@ elif page == "Inventory":
 # ============================================================
 
 elif page == "Stock In / Out":
-    st.title("🔄 Stock In / Out")
+    st.title("Stock In / Out")
     st.caption("Use this for restocking (In) or non-sale reductions like samples, damage, or personal use (Out). Regular sales are handled on the **Record a Sale** page.")
 
     if items_df.empty:
@@ -631,6 +780,11 @@ elif page == "Stock In / Out":
                 "Reason / note",
                 placeholder="e.g. Restocked from supplier / Sample given / Damaged bottle",
             )
+            cash_paid = st.number_input(
+                "Amount paid from cash (only if this was a restock paid in cash)",
+                min_value=0.0, step=50.0, value=0.0,
+                help="Leave at 0 if this restock wasn't paid in cash right now (e.g. paid by bank transfer, or this is a stock-out).",
+            )
             submitted = st.form_submit_button("Save movement", type="primary")
 
             if submitted:
@@ -641,7 +795,10 @@ elif page == "Stock In / Out":
                     if movement_type == "Out" and quantity > item_row["current_stock"]:
                         st.error(f"Only {item_row['current_stock']:.0f} in stock for {item_name} — can't remove {quantity:.0f}.")
                     else:
-                        record_stock_movement(int(item_row["id"]), movement_type, quantity, reason, move_date.isoformat())
+                        record_stock_movement(
+                            int(item_row["id"]), item_name, movement_type, quantity, reason, move_date.isoformat(),
+                            cash_paid=cash_paid if movement_type == "In" else None,
+                        )
                         st.success(f"Recorded: {movement_type} {quantity:.0f} x {item_name}")
                         st.rerun()
 
@@ -659,7 +816,7 @@ elif page == "Stock In / Out":
 # ============================================================
 
 elif page == "Record a Sale":
-    st.title("🛒 Record a Sale")
+    st.title("Record a Sale")
 
     if items_df.empty:
         st.info("Add items first under **Manage Items**.")
@@ -781,7 +938,7 @@ elif page == "Record a Sale":
 # ============================================================
 
 elif page == "Sales & Payments":
-    st.title("📋 Sales & Payments")
+    st.title("Sales & Payments")
 
     sales_df = get_sales_summary_df()
     if sales_df.empty:
@@ -824,6 +981,7 @@ elif page == "Sales & Payments":
             )
             st.write("**Items in this sale:**")
             st.dataframe(get_sale_line_items(pick), hide_index=True, use_container_width=True)
+            st.caption("Marking as Paid/Unpaid or deleting will automatically keep your Cash on Hand in sync.")
 
             b1, b2, b3 = st.columns(3)
             with b1:
@@ -851,16 +1009,14 @@ elif page == "Sales & Payments":
 # ============================================================
 
 elif page == "Customers":
-    st.title("👥 Customers")
+    st.title("Customers")
 
     customers_df = get_customers_df()
     if customers_df.empty:
         st.info("No customers yet — they're added automatically the first time you record a sale for them.")
     else:
         summary = get_customer_summary_df()
-        show = summary.drop(columns=["CustomerID"]).rename(
-            columns={"Purchases": "Purchases", "TotalSpent": "Total Spent", "Paid": "Paid", "Outstanding": "Outstanding", "LastPurchase": "Last Purchase"}
-        )
+        show = summary.drop(columns=["CustomerID"]).rename(columns={"LastPurchase": "Last Purchase", "TotalSpent": "Total Spent"})
         show["Total Spent"] = show["Total Spent"].map(peso)
         show["Paid"] = show["Paid"].map(peso)
         show["Outstanding"] = show["Outstanding"].map(peso)
@@ -901,11 +1057,101 @@ elif page == "Customers":
 
 
 # ============================================================
+# CASH ON HAND
+# ============================================================
+
+elif page == "Cash on Hand":
+    st.title("Cash on Hand")
+    st.caption("Sale payments (marked Paid) and cash-paid restocks are added here automatically. Use the form below for anything else — owner deposits, withdrawals, or other expenses.")
+
+    balance, total_in, total_out = get_cash_balance()
+    beginning, start_date = get_beginning_cash()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cash on hand", peso(balance))
+    c2.metric("Total cash in", peso(total_in))
+    c3.metric("Total cash out", peso(total_out))
+
+    with st.expander("⚙️ Set / update beginning cash"):
+        with st.form("beginning_cash_form"):
+            new_amount = st.number_input("Beginning cash amount", min_value=0.0, step=100.0, value=float(beginning))
+            new_date = st.date_input(
+                "As of date",
+                value=pd.to_datetime(start_date).date() if start_date else date.today(),
+            )
+            if st.form_submit_button("Save", type="primary"):
+                set_beginning_cash(new_amount, new_date.isoformat())
+                st.success("Beginning cash updated.")
+                st.rerun()
+
+    st.divider()
+    st.subheader("Add a manual cash entry")
+    with st.form("manual_cash_form", clear_on_submit=True):
+        cc1, cc2, cc3 = st.columns(3)
+        with cc1:
+            tx_type = st.radio("Type", ["In", "Out"], horizontal=True)
+        with cc2:
+            amount = st.number_input("Amount", min_value=0.0, step=50.0)
+        with cc3:
+            tx_date = st.date_input("Date", value=date.today())
+        category = st.selectbox("Category", ["Owner Deposit", "Withdrawal", "Other Income", "Other Expense"])
+        note = st.text_input("Note (optional)")
+        if st.form_submit_button("Add entry", type="primary"):
+            if amount <= 0:
+                st.error("Amount must be greater than 0.")
+            else:
+                add_cash_transaction(tx_date.isoformat(), tx_type, category, amount, note, ref_type="manual", ref_id=None)
+                st.success("Cash entry added.")
+                st.rerun()
+
+    st.divider()
+    st.subheader("Cash ledger")
+    ledger = get_cash_ledger_df()
+    if ledger.empty:
+        st.caption("No cash transactions yet.")
+    else:
+        ledger = ledger.sort_values(["Date", "id"]).reset_index(drop=True)
+        running = beginning
+        balances = []
+        for _, row in ledger.iterrows():
+            running += row["Amount"] if row["Type"] == "In" else -row["Amount"]
+            balances.append(running)
+        ledger["Balance"] = balances
+
+        display_ledger = ledger.sort_values(["Date", "id"], ascending=False).drop(columns=["id"]).copy()
+        display_ledger["Amount"] = display_ledger["Amount"].map(peso)
+        display_ledger["Balance"] = display_ledger["Balance"].map(peso)
+        st.dataframe(display_ledger, hide_index=True, use_container_width=True)
+
+        csv = ledger.drop(columns=["id"]).to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download cash ledger as CSV", csv, "cash_ledger.csv", "text/csv")
+
+        manual_df = get_manual_cash_df()
+        if not manual_df.empty:
+            st.divider()
+            st.subheader("Remove a manual entry")
+            st.caption("Only entries you added manually can be removed here. Sale and restock entries are managed from their own pages.")
+            pick = st.selectbox(
+                "Select entry to remove",
+                manual_df["id"].tolist(),
+                format_func=lambda i: (
+                    f"#{i} — {manual_df.loc[manual_df['id']==i,'Date'].values[0]} — "
+                    f"{manual_df.loc[manual_df['id']==i,'Category'].values[0]} — "
+                    f"{peso(manual_df.loc[manual_df['id']==i,'Amount'].values[0])}"
+                ),
+            )
+            if st.button("🗑️ Remove entry"):
+                delete_cash_transaction(pick)
+                st.success("Removed.")
+                st.rerun()
+
+
+# ============================================================
 # MANAGE ITEMS
 # ============================================================
 
 elif page == "Manage Items":
-    st.title("⚙️ Manage Items")
+    st.title("Manage Items")
 
     tab1, tab2 = st.tabs(["➕ Add new item", "✏️ Edit / remove existing item"])
 
