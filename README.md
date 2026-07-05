@@ -56,7 +56,12 @@ drawn by a component that reads Streamlit's theme setting directly.
 - **Sales & Payments** — full sales ledger, filter by customer or status, mark unpaid sales as paid (or back), delete a mistaken entry — stock and cash both stay in sync automatically.
 - **Customers** — a directory of everyone who's bought from you: total spent, paid vs outstanding, purchase history, and their saved custom prices per item.
 - **Cash on Hand** — set your beginning cash balance, see your running total, and add manual entries for anything not already tracked (owner deposits, withdrawals, other income/expenses). Includes a full ledger with running balance and CSV export.
-- **Manage Items** — add new perfumes as your catalog grows, edit standard cost/selling price, remove items with no sales history.
+- **Manage Items** — add new perfumes one at a time, edit an item's standard cost/selling price, or use the bulk tools below to manage many at once.
+
+### Bulk managing your inventory (Manage Items page)
+- **Bulk edit** — a spreadsheet-style grid: edit any cell, delete a row with its trash icon, or add new items at the bottom row. One "Save all changes" button applies everything at once.
+- **Import / Export** — download your current items as a CSV (also a handy backup or template), edit it in Excel/Google Sheets, and re-upload. Matching is by item name: existing names get updated, new names get added.
+- **Danger zone** — "Reset all stock to 0" keeps your items/prices but zeroes quantities (handy before a fresh physical count). "Wipe everything" permanently deletes all items, sales, customers, and cash records for a true clean-slate restart — it requires typing DELETE to confirm and cannot be undone.
 
 ### How Cash on Hand stays accurate
 - Marking a sale **Paid** (when recording it, or later) adds that amount to cash automatically. Switching it back to Unpaid removes it.

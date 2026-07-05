@@ -338,6 +338,69 @@ def delete_item(item_id):
     return True, "Item deleted."
 
 
+def bulk_upsert_items(rows):
+    """rows: list of dicts with name, unit_measure, unit_cost, selling_price, current_stock, low_stock_threshold.
+    Existing items are matched (and updated) by name; anything new is inserted."""
+    conn = get_conn()
+    c = conn.cursor()
+    added, updated = 0, 0
+    for r in rows:
+        name = (r.get("name") or "").strip()
+        if not name:
+            continue
+        c.execute("SELECT id FROM items WHERE name=?", (name,))
+        existing = c.fetchone()
+        if existing:
+            c.execute(
+                """UPDATE items SET unit_measure=?, unit_cost=?, selling_price=?, current_stock=?, low_stock_threshold=? WHERE id=?""",
+                (
+                    r.get("unit_measure") or "",
+                    float(r.get("unit_cost") or 0),
+                    float(r.get("selling_price") or 0),
+                    float(r.get("current_stock") or 0),
+                    float(r.get("low_stock_threshold") or 3),
+                    existing[0],
+                ),
+            )
+            updated += 1
+        else:
+            c.execute(
+                """INSERT INTO items (name, unit_measure, unit_cost, selling_price, current_stock, low_stock_threshold, date_added)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    name,
+                    r.get("unit_measure") or "",
+                    float(r.get("unit_cost") or 0),
+                    float(r.get("selling_price") or 0),
+                    float(r.get("current_stock") or 0),
+                    float(r.get("low_stock_threshold") or 3),
+                    date.today().isoformat(),
+                ),
+            )
+            added += 1
+    conn.commit()
+    conn.close()
+    return added, updated
+
+
+def reset_all_stock_to_zero():
+    conn = get_conn()
+    conn.execute("UPDATE items SET current_stock = 0")
+    conn.commit()
+    conn.close()
+
+
+def full_wipe_all_data():
+    """Deletes everything — items, sales, customers, stock history, cash records. Cannot be undone."""
+    conn = get_conn()
+    c = conn.cursor()
+    for table in ["sale_items", "sales", "stock_movements", "customer_prices", "customers", "items", "cash_transactions"]:
+        c.execute(f"DELETE FROM {table}")
+    c.execute("UPDATE cash_settings SET beginning_cash = 0, start_date = ?", (date.today().isoformat(),))
+    conn.commit()
+    conn.close()
+
+
 # ---------- stock movements ----------
 
 def record_stock_movement(item_id, item_name, movement_type, quantity, reason, move_date, cash_paid=None):
@@ -1177,7 +1240,9 @@ elif page == "Cash on Hand":
 elif page == "Manage Items":
     st.title("Manage Items")
 
-    tab1, tab2 = st.tabs(["➕ Add new item", "✏️ Edit / remove existing item"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["➕ Add new item", "✏️ Edit / remove one item", "📋 Bulk edit", "⬆️⬇️ Import / Export"]
+    )
 
     with tab1:
         with st.form("add_item_form", clear_on_submit=True):
@@ -1240,3 +1305,157 @@ elif page == "Manage Items":
                         st.rerun()
                     else:
                         st.error(msg)
+
+    with tab3:
+        st.caption(
+            "Edit cells directly, use the trash icon on a row to delete it, or scroll to the bottom "
+            "row to add a new item — like a spreadsheet. Click **Save all changes** when you're done."
+        )
+        cols = ["id", "name", "unit_measure", "unit_cost", "selling_price", "current_stock", "low_stock_threshold"]
+        if items_df.empty:
+            base_df = pd.DataFrame(columns=cols)
+        else:
+            base_df = items_df[cols].copy()
+
+        rename_map = {
+            "id": "ID",
+            "name": "Item",
+            "unit_measure": "Unit",
+            "unit_cost": "Cost",
+            "selling_price": "Selling Price",
+            "current_stock": "Current Stock",
+            "low_stock_threshold": "Threshold",
+        }
+        editable_df = base_df.rename(columns=rename_map)
+
+        edited_bulk = st.data_editor(
+            editable_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="bulk_items_editor",
+            column_config={
+                "ID": st.column_config.NumberColumn(disabled=True, width="small"),
+                "Cost": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f", min_value=0.0),
+                "Selling Price": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f", min_value=0.0),
+                "Current Stock": st.column_config.NumberColumn(min_value=0.0),
+                "Threshold": st.column_config.NumberColumn(min_value=0.0),
+            },
+        )
+
+        if st.button("💾 Save all changes", type="primary", key="save_bulk_items"):
+            original_ids = set(base_df["id"].dropna().astype(int).tolist())
+            kept_ids = set(pd.to_numeric(edited_bulk["ID"], errors="coerce").dropna().astype(int).tolist())
+            deleted_ids = original_ids - kept_ids
+
+            blocked = []
+            deleted_count = 0
+            for did in deleted_ids:
+                ok, msg = delete_item(int(did))
+                if ok:
+                    deleted_count += 1
+                else:
+                    blocked.append((did, msg))
+
+            rows_to_upsert = []
+            for _, r in edited_bulk.iterrows():
+                name = str(r.get("Item", "") or "").strip()
+                if not name:
+                    continue
+                rows_to_upsert.append(
+                    {
+                        "name": name,
+                        "unit_measure": r.get("Unit") or "",
+                        "unit_cost": r.get("Cost") or 0,
+                        "selling_price": r.get("Selling Price") or 0,
+                        "current_stock": r.get("Current Stock") or 0,
+                        "low_stock_threshold": r.get("Threshold") or 3,
+                    }
+                )
+            added, updated = bulk_upsert_items(rows_to_upsert)
+
+            parts = []
+            if added:
+                parts.append(f"{added} added")
+            if updated:
+                parts.append(f"{updated} updated")
+            if deleted_count:
+                parts.append(f"{deleted_count} deleted")
+            st.success("Saved — " + ", ".join(parts) if parts else "No changes to save.")
+            for did, msg in blocked:
+                st.warning(msg)
+            st.rerun()
+
+    with tab4:
+        st.caption(
+            "Download your current items as a CSV — handy as a backup, or as a template you can edit "
+            "in Excel/Google Sheets and re-upload. Matching is done by item name: existing names get "
+            "updated, new names get added."
+        )
+        export_cols = ["name", "unit_measure", "unit_cost", "selling_price", "current_stock", "low_stock_threshold"]
+        export_rename = {
+            "name": "Item", "unit_measure": "Unit", "unit_cost": "Cost",
+            "selling_price": "Selling Price", "current_stock": "Current Stock", "low_stock_threshold": "Threshold",
+        }
+        if items_df.empty:
+            export_df = pd.DataFrame(columns=list(export_rename.values()))
+        else:
+            export_df = items_df[export_cols].rename(columns=export_rename)
+        st.download_button(
+            "⬇️ Download items as CSV",
+            export_df.to_csv(index=False).encode("utf-8"),
+            "aroma_legante_items.csv",
+            "text/csv",
+        )
+
+        st.divider()
+        uploaded = st.file_uploader("Upload a CSV to bulk add/update items", type=["csv"])
+        if uploaded is not None:
+            try:
+                upload_df = pd.read_csv(uploaded)
+                required_cols = {"Item", "Unit", "Cost", "Selling Price", "Current Stock", "Threshold"}
+                missing = required_cols - set(upload_df.columns)
+                if missing:
+                    st.error(f"Missing column(s): {', '.join(sorted(missing))}. Please match the template from the download button above.")
+                else:
+                    st.write("Preview:")
+                    st.dataframe(upload_df, hide_index=True, use_container_width=True)
+                    if st.button("✅ Confirm import", type="primary"):
+                        rows = [
+                            {
+                                "name": str(r["Item"]).strip(),
+                                "unit_measure": str(r.get("Unit", "") or ""),
+                                "unit_cost": r.get("Cost", 0),
+                                "selling_price": r.get("Selling Price", 0),
+                                "current_stock": r.get("Current Stock", 0),
+                                "low_stock_threshold": r.get("Threshold", 3),
+                            }
+                            for _, r in upload_df.iterrows()
+                        ]
+                        added, updated = bulk_upsert_items(rows)
+                        st.success(f"Import complete — {added} added, {updated} updated.")
+                        st.rerun()
+            except Exception as e:
+                st.error(f"Couldn't read that file: {e}")
+
+    st.divider()
+    with st.expander("⚠️ Danger zone"):
+        st.markdown("**Reset all stock counts to 0** — keeps your items, costs, and prices, just zeroes out quantities. Useful before a fresh physical count.")
+        if st.checkbox("I understand this will zero out every item's stock count", key="confirm_reset_stock"):
+            if st.button("Reset all stock to 0", key="do_reset_stock"):
+                reset_all_stock_to_zero()
+                st.success("All stock counts reset to 0.")
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown(
+            "**Wipe everything and start completely fresh** — permanently deletes ALL items, sales, "
+            "customers, stock history, and cash records. This cannot be undone."
+        )
+        confirm_text = st.text_input("Type DELETE (all caps) to confirm", key="wipe_confirm_text")
+        if st.button("🗑️ Wipe everything", key="do_full_wipe"):
+            if confirm_text.strip() == "DELETE":
+                full_wipe_all_data()
+                st.success("Everything has been reset. Add your items to get started again.")
+                st.rerun()
+            else:
+                st.error("Type DELETE (all caps) in the box first to confirm.")
