@@ -248,11 +248,21 @@ def init_db():
             ref_id INTEGER
         )"""
     )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )"""
+    )
     conn.commit()
 
-    # Seed with the items visible in the user's original tracker, only once
+    # Seed with the items from the original tracker — ONLY on a brand-new database.
+    # (Previously this ran whenever the items table was empty, so "Wipe everything"
+    #  would immediately re-load the starter perfumes on the next refresh.)
+    c.execute("SELECT value FROM app_meta WHERE key='seeded'")
+    already_seeded = c.fetchone() is not None
     c.execute("SELECT COUNT(*) FROM items")
-    if c.fetchone()[0] == 0:
+    if not already_seeded and c.fetchone()[0] == 0:
         seed = [
             ("Aventus Creed", "30ml bottle", 160.0, 8),
             ("Le Labo Santal 33", "30ml bottle", 160.0, 11),
@@ -271,6 +281,9 @@ def init_db():
                    VALUES (?, ?, ?, 0, ?, 3, ?)""",
                 (name, um, cost, stock, today),
             )
+        conn.commit()
+    if not already_seeded:
+        c.execute("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('seeded', '1')")
         conn.commit()
 
     # Backfill a customers directory from any sales already on file (safe to run every start)
@@ -396,6 +409,8 @@ def full_wipe_all_data():
     c = conn.cursor()
     for table in ["sale_items", "sales", "stock_movements", "customer_prices", "customers", "items", "cash_transactions"]:
         c.execute(f"DELETE FROM {table}")
+    # Restart ID numbering (sale #1, item #1, ...) for a true clean slate
+    c.execute("DELETE FROM sqlite_sequence")
     c.execute("UPDATE cash_settings SET beginning_cash = 0, start_date = ?", (date.today().isoformat(),))
     conn.commit()
     conn.close()
@@ -1240,6 +1255,12 @@ elif page == "Cash on Hand":
 elif page == "Manage Items":
     st.title("Manage Items")
 
+    # Show the result of a Danger-zone action (survives the page refresh)
+    _flash = st.session_state.pop("_flash", None)
+    if _flash:
+        kind, msg = _flash
+        (st.success if kind == "success" else st.error)(msg)
+
     tab1, tab2, tab3, tab4 = st.tabs(
         ["➕ Add new item", "✏️ Edit / remove one item", "📋 Bulk edit", "⬆️⬇️ Import / Export"]
     )
@@ -1441,21 +1462,29 @@ elif page == "Manage Items":
     with st.expander("⚠️ Danger zone"):
         st.markdown("**Reset all stock counts to 0** — keeps your items, costs, and prices, just zeroes out quantities. Useful before a fresh physical count.")
         if st.checkbox("I understand this will zero out every item's stock count", key="confirm_reset_stock"):
-            if st.button("Reset all stock to 0", key="do_reset_stock"):
+            def _do_reset_stock():
                 reset_all_stock_to_zero()
-                st.success("All stock counts reset to 0.")
-                st.rerun()
+                st.session_state["confirm_reset_stock"] = False
+                st.session_state.pop("bulk_items_editor", None)
+                st.session_state["_flash"] = ("success", "All stock counts reset to 0.")
+
+            st.button("Reset all stock to 0", key="do_reset_stock", on_click=_do_reset_stock)
 
         st.markdown("---")
         st.markdown(
             "**Wipe everything and start completely fresh** — permanently deletes ALL items, sales, "
             "customers, stock history, and cash records. This cannot be undone."
         )
-        confirm_text = st.text_input("Type DELETE (all caps) to confirm", key="wipe_confirm_text")
-        if st.button("🗑️ Wipe everything", key="do_full_wipe"):
-            if confirm_text.strip() == "DELETE":
+        st.text_input("Type DELETE (all caps) to confirm", key="wipe_confirm_text")
+
+        def _do_full_wipe():
+            if st.session_state.get("wipe_confirm_text", "").strip() == "DELETE":
                 full_wipe_all_data()
-                st.success("Everything has been reset. Add your items to get started again.")
-                st.rerun()
+                # Clear the confirm box and any half-finished grid edits
+                st.session_state["wipe_confirm_text"] = ""
+                st.session_state.pop("bulk_items_editor", None)
+                st.session_state["_flash"] = ("success", "Everything has been wiped. Add your items to get started again.")
             else:
-                st.error("Type DELETE (all caps) in the box first to confirm.")
+                st.session_state["_flash"] = ("error", "Type DELETE (all caps) in the box first to confirm.")
+
+        st.button("🗑️ Wipe everything", key="do_full_wipe", on_click=_do_full_wipe)
