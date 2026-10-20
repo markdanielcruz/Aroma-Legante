@@ -1,91 +1,41 @@
 # Aroma Legante — Inventory & Sales Manager
 
-A Streamlit app for tracking your perfume stock, sales, customers, and cash on hand.
+A Streamlit app for tracking perfume stock, sales, customers, and cash on hand.
 
-## Setup (one-time)
+## Where the data is saved
+
+Everything is saved to the Google Sheet **"Aroma Legante — App Database"** through a
+small Google Apps Script. The app keeps a fast local copy and sends every change to
+the Sheet automatically; when Streamlit restarts, it reloads everything from the Sheet.
+A daily copy of the Sheet is kept in the Google Drive folder **Aroma Legante Backups**.
+
+The connection details live in Streamlit **Secrets** (never in this repo):
+
+```toml
+apps_script_url = "https://script.google.com/macros/s/.../exec"
+apps_script_token = "..."
+```
+
+If the Sheet can't be reached when the app starts, the app pauses instead of starting
+blank, so an empty app can never overwrite your data.
+
+## Files
+
+- `app.py` — the whole app (styling is built in)
+- `requirements.txt` — Python packages
+- `.streamlit/config.toml` — theme colors for tables and grids
+
+## Pages
+
+Dashboard · Inventory · Stock In / Out · Record a Sale · Sales & Payments ·
+Customers · Cash on Hand · Manage Items · Data & Backup
+
+## Run on your own computer (optional)
 
 ```bash
 pip install -r requirements.txt
-```
-
-## Run
-
-```bash
 streamlit run app.py
 ```
 
-This opens the app in your browser (usually http://localhost:8501). Keep the
-terminal window open while you use it.
-
-Your data is saved automatically to a file called `perfume_inventory.db`
-that sits next to `app.py`. As long as you keep that file, everything will
-still be there next time you run the app — just don't delete it. Back it up
-occasionally with the CSV download buttons (e.g. copy it to a cloud drive).
-
-## If the app ever looks inconsistent (some parts light, some dark)
-
-This usually means the hidden `.streamlit` folder didn't make it to GitHub —
-file managers on Windows and Mac often hide folders starting with a dot, so
-it's easy to drag-and-drop everything except that one.
-
-The easiest fix: on GitHub, click **Add file → Create new file**, and in the
-filename box type the full path **`.streamlit/config.toml`** (GitHub creates
-the folder automatically) — then paste in this content and commit:
-
-```toml
-[theme]
-base="dark"
-primaryColor="#C98A96"
-backgroundColor="#15110D"
-secondaryBackgroundColor="#221C18"
-textColor="#E7DED6"
-font="serif"
-```
-
-The app's own styling (fonts, colors, layout) is built directly into
-`app.py` so it always applies — but this config file is what makes tables
-and the data-entry grids match the same dark theme too, since those are
-drawn by a component that reads Streamlit's theme setting directly.
-
-## What's inside
-
-- **Dashboard** — cash on hand, stock value, profit earned, outstanding payables, low-stock alerts
-- **Inventory** — all your perfumes with cost, selling price, margin %, live stock counts, and a clear 🟢/🟠 stock status
-- **Stock In / Out** — restocking, samples, damage, or any non-sale stock change. If you pay for a restock in cash, enter the amount and it's deducted from Cash on Hand automatically.
-- **Record a Sale** — pick a customer from a dropdown (or add a new one), mark paid/unpaid, and set quantity **and price per item** — so regulars can each have their own price for the same perfume. Prices are remembered as that customer's "usual price." Paid sales add to Cash on Hand automatically.
-- **Sales & Payments** — full sales ledger, filter by customer or status, mark unpaid sales as paid (or back), delete a mistaken entry — stock and cash both stay in sync automatically.
-- **Customers** — a directory of everyone who's bought from you: total spent, paid vs outstanding, purchase history, and their saved custom prices per item.
-- **Cash on Hand** — set your beginning cash balance, see your running total, and add manual entries for anything not already tracked (owner deposits, withdrawals, other income/expenses). Includes a full ledger with running balance and CSV export.
-- **Manage Items** — add new perfumes one at a time, edit an item's standard cost/selling price, or use the bulk tools below to manage many at once.
-
-### Bulk managing your inventory (Manage Items page)
-- **Bulk edit** — a spreadsheet-style grid: edit any cell, delete a row with its trash icon, or add new items at the bottom row. One "Save all changes" button applies everything at once.
-- **Import / Export** — download your current items as a CSV (also a handy backup or template), edit it in Excel/Google Sheets, and re-upload. Matching is by item name: existing names get updated, new names get added.
-- **Danger zone** — "Reset all stock to 0" keeps your items/prices but zeroes quantities (handy before a fresh physical count). "Wipe everything" permanently deletes all items, sales, customers, and cash records for a true clean-slate restart — it requires typing DELETE to confirm and cannot be undone.
-
-### How Cash on Hand stays accurate
-- Marking a sale **Paid** (when recording it, or later) adds that amount to cash automatically. Switching it back to Unpaid removes it.
-- Deleting a sale removes its cash entry too, along with restoring the stock.
-- A restock is only deducted from cash if you fill in "Amount paid from cash" on the Stock In / Out page — leave it at 0 if you paid another way, or haven't paid yet.
-- Everything else (owner deposits, withdrawals, one-off expenses) goes through the manual entry form on the Cash on Hand page.
-
-Your existing items (Aventus Creed, Le Labo Santal 33, Bleu de Chanel, Dior
-Sauvage, Lacoste White, D&G Light Blue, Joe Malone Woodsage & SS, Miss Dior)
-are pre-loaded at ₱160 cost with their last known stock counts from your
-tracker. Standard selling prices start at ₱0 — set them under **Manage
-Items** → Edit. Add your 3 remaining items the same way, and set your
-beginning cash under **Cash on Hand**.
-
-## Deploying on Streamlit Community Cloud
-
-1. Push these files to your GitHub repo: `app.py`, `requirements.txt`, `.streamlit/config.toml`, this README
-2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app**
-3. Repository: your repo (e.g. `yourusername/Aroma-Legante`)
-4. Branch: `main`
-5. Main file path: `app.py`
-6. Deploy
-
-⚠️ Note: Streamlit Cloud can wipe locally-written files (including
-`perfume_inventory.db`) when the app restarts or you push new code. Use the
-CSV download buttons regularly to keep a backup until you're ready to move
-to a persistent cloud database.
+To connect it to the Sheet locally, put the two Secrets lines in `.streamlit/secrets.toml`
+next to `app.py` (don't upload that file to GitHub).
