@@ -1,33 +1,57 @@
 """
 Aroma Legante — Inventory & Sales Manager
 --------------------------------------------
-A single-file Streamlit app backed by a local SQLite database.
+A single-file Streamlit app.
 
-Run with:
+WHERE YOUR DATA LIVES
+    The permanent copy of every item, sale, customer and cash entry is kept
+    in your Google Sheet ("Aroma Legante — App Database"), one tab per table.
+    The app works on a fast local copy (perfume_inventory.db) and saves every
+    change back to the Google Sheet automatically. Whenever the app restarts
+    (new code uploaded, app woke up from sleep, reboot) it rebuilds the local
+    copy from the Google Sheet — so nothing is lost.
+
+    The connection is a small Google Apps Script attached to the Sheet. Its
+    web-app link and password go in Streamlit "Secrets":
+        apps_script_url   = "https://script.google.com/macros/s/.../exec"
+        apps_script_token = "..."
+    Without them, the app still runs but only saves on the server (and can be lost).
+
+Run locally with:
     pip install -r requirements.txt
     streamlit run app.py
-
-Your data is saved in perfume_inventory.db (created automatically the
-first time you run the app) sitting next to this file, so it will still
-be there the next time you open it.
 """
 
+import hashlib
+import json
+import os
+import shutil
 import sqlite3
-from datetime import date
+import tempfile
+import threading
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import streamlit as st
 
 DB_PATH = "perfume_inventory.db"
 CURRENCY = "₱"
 APP_NAME = "Aroma Legante"
+TZ = ZoneInfo("Asia/Manila")
+
+
+def today_ph():
+    """Today's date in the Philippines (the cloud server runs on UTC)."""
+    return datetime.now(TZ).date()
+
 
 st.set_page_config(page_title=APP_NAME, page_icon="🌸", layout="wide")
 
 # ============================================================
-# LOOK & FEEL — forced light, warm boutique palette
-# (explicitly overrides the viewer's light/dark setting so the
-#  app always looks the same, regardless of browser/system theme)
+# LOOK & FEEL — warm dark boutique palette, built in so it
+# always applies even if .streamlit/config.toml is missing
 # ============================================================
 
 CUSTOM_CSS = """
@@ -154,7 +178,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ============================================================
-# DATABASE
+# DATABASE (local working copy)
 # ============================================================
 
 def get_conn():
@@ -163,8 +187,8 @@ def get_conn():
     return conn
 
 
-def init_db():
-    conn = get_conn()
+def create_schema(conn):
+    """Create any missing tables (safe to run any time)."""
     c = conn.cursor()
     c.execute(
         """CREATE TABLE IF NOT EXISTS items (
@@ -256,9 +280,13 @@ def init_db():
     )
     conn.commit()
 
+
+def init_db():
+    conn = get_conn()
+    create_schema(conn)
+    c = conn.cursor()
+
     # Seed with the items from the original tracker — ONLY on a brand-new database.
-    # (Previously this ran whenever the items table was empty, so "Wipe everything"
-    #  would immediately re-load the starter perfumes on the next refresh.)
     c.execute("SELECT value FROM app_meta WHERE key='seeded'")
     already_seeded = c.fetchone() is not None
     c.execute("SELECT COUNT(*) FROM items")
@@ -273,7 +301,7 @@ def init_db():
             ("Joe Malone Woodsage & SS", "30ml bottle", 160.0, 2),
             ("Miss Dior", "30ml bottle", 160.0, 5),
         ]
-        today = date.today().isoformat()
+        today = today_ph().isoformat()
         for name, um, cost, stock in seed:
             c.execute(
                 """INSERT INTO items
@@ -289,17 +317,17 @@ def init_db():
     # Backfill a customers directory from any sales already on file (safe to run every start)
     c.execute("SELECT DISTINCT customer_name FROM sales")
     for (nm,) in c.fetchall():
-        if nm and nm.strip():
+        if nm and str(nm).strip():
             c.execute(
                 "INSERT OR IGNORE INTO customers (name, date_added) VALUES (?, ?)",
-                (nm.strip(), date.today().isoformat()),
+                (str(nm).strip(), today_ph().isoformat()),
             )
 
     c.execute("SELECT COUNT(*) FROM cash_settings")
     if c.fetchone()[0] == 0:
         c.execute(
             "INSERT INTO cash_settings (id, beginning_cash, start_date) VALUES (1, 0, ?)",
-            (date.today().isoformat(),),
+            (today_ph().isoformat(),),
         )
     conn.commit()
     conn.close()
@@ -319,7 +347,7 @@ def add_item(name, unit_measure, unit_cost, selling_price, initial_stock, thresh
     conn.execute(
         """INSERT INTO items (name, unit_measure, unit_cost, selling_price, current_stock, low_stock_threshold, date_added)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (name, unit_measure, unit_cost, selling_price, initial_stock, threshold, date.today().isoformat()),
+        (name, unit_measure, unit_cost, selling_price, initial_stock, threshold, today_ph().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -348,6 +376,7 @@ def delete_item(item_id):
     c.execute("DELETE FROM items WHERE id=?", (item_id,))
     conn.commit()
     conn.close()
+    _sync_state()["allow_empty_items"] = True  # you deleted on purpose
     return True, "Item deleted."
 
 
@@ -387,7 +416,7 @@ def bulk_upsert_items(rows):
                     float(r.get("selling_price") or 0),
                     float(r.get("current_stock") or 0),
                     float(r.get("low_stock_threshold") or 3),
-                    date.today().isoformat(),
+                    today_ph().isoformat(),
                 ),
             )
             added += 1
@@ -409,11 +438,11 @@ def full_wipe_all_data():
     c = conn.cursor()
     for table in ["sale_items", "sales", "stock_movements", "customer_prices", "customers", "items", "cash_transactions"]:
         c.execute(f"DELETE FROM {table}")
-    # Restart ID numbering (sale #1, item #1, ...) for a true clean slate
     c.execute("DELETE FROM sqlite_sequence")
-    c.execute("UPDATE cash_settings SET beginning_cash = 0, start_date = ?", (date.today().isoformat(),))
+    c.execute("UPDATE cash_settings SET beginning_cash = 0, start_date = ?", (today_ph().isoformat(),))
     conn.commit()
     conn.close()
+    _sync_state()["allow_empty_items"] = True
 
 
 # ---------- stock movements ----------
@@ -470,7 +499,7 @@ def get_or_create_customer(name):
     if row:
         cid = row[0]
     else:
-        c.execute("INSERT INTO customers (name, date_added) VALUES (?, ?)", (name, date.today().isoformat()))
+        c.execute("INSERT INTO customers (name, date_added) VALUES (?, ?)", (name, today_ph().isoformat()))
         conn.commit()
         cid = c.lastrowid
     conn.close()
@@ -547,7 +576,7 @@ def get_beginning_cash():
     c.execute("SELECT beginning_cash, start_date FROM cash_settings WHERE id=1")
     row = c.fetchone()
     conn.close()
-    return (row[0], row[1]) if row else (0.0, date.today().isoformat())
+    return (row[0], row[1]) if row else (0.0, today_ph().isoformat())
 
 
 def set_beginning_cash(amount, start_date):
@@ -731,7 +760,217 @@ def peso(x):
 
 NEW_CUSTOMER_LABEL = "➕ Add a new customer..."
 
-init_db()
+
+# ============================================================
+# GOOGLE SHEET — permanent storage (through Google Apps Script)
+# ------------------------------------------------------------
+#   * On startup: if the Sheet has data, the local copy is rebuilt from it.
+#     If the Sheet is empty (very first time), local data is copied up to it.
+#   * After every click: any table that changed is sent to the Sheet.
+#   * If the Sheet can't be reached at startup, the app stops instead of
+#     starting blank — so an empty app can never overwrite your Sheet.
+# ============================================================
+
+SHEET_TABLES = [
+    "items", "sales", "sale_items", "customers", "customer_prices",
+    "stock_movements", "cash_transactions", "cash_settings", "app_meta",
+]
+SHEET_ID = "1t_AqDymCXbsEBHjJlpzw1oaynednm22t41JQEdz3WMQ"
+SHEET_LINK = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+
+
+def _secret(name):
+    try:
+        return str(st.secrets.get(name, "") or "").strip()
+    except Exception:  # no secrets at all
+        return ""
+
+
+def sheets_configured():
+    url = _secret("apps_script_url")
+    return url.startswith("https://script.google.com/") and url.rstrip("/").endswith("/exec") and bool(_secret("apps_script_token"))
+
+
+@st.cache_resource(show_spinner=False)
+def _sync_state():
+    # Shared by every browser tab using this app (one copy per server process)
+    return {
+        "lock": threading.RLock(),
+        "loaded": False,            # local copy has been matched with the Sheet
+        "hashes": {},               # fingerprint of each table as last saved to the Sheet
+        "allow_empty_items": False, # set only when you delete items on purpose
+        "error": None,
+        "last_sync": None,
+    }
+
+
+class SheetError(Exception):
+    pass
+
+
+def _parse_reply(resp):
+    if resp.status_code != 200:
+        raise SheetError(f"Google replied with error {resp.status_code}")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise SheetError(
+            "Google sent back a web page instead of data. Usually this means the Apps Script "
+            "web app isn't deployed with \"Who has access: Anyone\", or the URL in Secrets is wrong."
+        )
+    if not data.get("ok"):
+        raise SheetError(data.get("error") or "unknown error from the Apps Script")
+    return data
+
+
+def _api_load():
+    resp = requests.get(
+        _secret("apps_script_url"),
+        params={"token": _secret("apps_script_token")},
+        timeout=60,
+    )
+    return _parse_reply(resp).get("tables", {})
+
+
+def _api_save(tables, allow_empty_items=False):
+    body = json.dumps(
+        {"token": _secret("apps_script_token"), "tables": tables, "allow_empty_items": bool(allow_empty_items)}
+    )
+    resp = requests.post(
+        _secret("apps_script_url"),
+        data=body.encode("utf-8"),
+        headers={"Content-Type": "text/plain;charset=utf-8"},
+        timeout=90,
+    )
+    _parse_reply(resp)
+
+
+def _table_snapshot(conn, table):
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+    rows = conn.execute(f"SELECT {', '.join(cols)} FROM {table} ORDER BY rowid").fetchall()
+    fingerprint = hashlib.md5(repr((cols, rows)).encode("utf-8")).hexdigest()
+    return cols, rows, fingerprint
+
+
+def _cell(v):
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def push_changes(force=False):
+    """Send every table that changed since the last save to the Google Sheet."""
+    if not sheets_configured():
+        return
+    state = _sync_state()
+    with state["lock"]:
+        if not state["loaded"]:
+            return  # never write to the Sheet before we've read it
+        conn = get_conn()
+        changed = {}
+        for t in SHEET_TABLES:
+            cols, rows, fp = _table_snapshot(conn, t)
+            if force or state["hashes"].get(t) != fp:
+                changed[t] = (cols, rows, fp)
+        conn.close()
+        if not changed:
+            return
+        payload = {t: [cols] + [[_cell(v) for v in r] for r in rows] for t, (cols, rows, fp) in changed.items()}
+        try:
+            _api_save(payload, allow_empty_items=state["allow_empty_items"])
+            for t, (cols, rows, fp) in changed.items():
+                state["hashes"][t] = fp
+            state["allow_empty_items"] = False
+            state["error"] = None
+            state["last_sync"] = datetime.now(TZ)
+        except Exception as e:  # change stays here; it retries on the next click
+            state["error"] = f"{type(e).__name__}: {e}"
+
+
+def _rebuild_local_from_sheet(tables):
+    """Replace the local database with the contents of the Google Sheet."""
+    tmp_path = DB_PATH + ".loading"
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    conn = sqlite3.connect(tmp_path)
+    create_schema(conn)
+    for t in SHEET_TABLES:
+        values = tables.get(t) or []
+        if len(values) < 2:
+            continue
+        known = [r[1] for r in conn.execute(f"PRAGMA table_info({t})")]
+        header = [str(h).strip() for h in values[0]]
+        idx = [(i, h) for i, h in enumerate(header) if h in known]
+        if not idx:
+            continue
+        cols = [h for _, h in idx]
+        sql = f"INSERT OR REPLACE INTO {t} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})"
+        for raw in values[1:]:
+            row = [str(raw[i]) if i < len(raw) and raw[i] is not None else "" for i, _ in idx]
+            if all(v.strip() == "" for v in row):
+                continue
+            conn.execute(sql, [None if v == "" else v for v in row])
+    conn.commit()
+    conn.close()
+    os.replace(tmp_path, DB_PATH)
+
+
+def _remember_saved_state():
+    state = _sync_state()
+    conn = get_conn()
+    for t in SHEET_TABLES:
+        state["hashes"][t] = _table_snapshot(conn, t)[2]
+    conn.close()
+
+
+def load_from_sheet():
+    """Match the local copy with the Google Sheet. Runs once per app start (and on Reload)."""
+    state = _sync_state()
+    with state["lock"]:
+        tables = _api_load()
+        sheet_has_data = any(len(tables.get(t) or []) > 1 for t in SHEET_TABLES)
+        if sheet_has_data:
+            _rebuild_local_from_sheet(tables)
+            init_db()  # fills in anything missing; never re-seeds (the Sheet remembers)
+            _remember_saved_state()
+            state["loaded"] = True
+            push_changes()  # only sends something if init_db had to fill a gap
+        else:
+            # Brand-new, empty Sheet: copy whatever is here up to it
+            init_db()
+            state["loaded"] = True
+            push_changes(force=True)
+        if state["error"] is None:
+            state["last_sync"] = datetime.now(TZ)
+
+
+def startup():
+    state = _sync_state()
+    if not sheets_configured():
+        init_db()
+        return
+    with state["lock"]:
+        if state["loaded"]:
+            return
+        try:
+            load_from_sheet()
+        except Exception as e:
+            st.error(
+                "**Couldn't open your Google Sheet, so the app has paused to protect your data.**\n\n"
+                f"Details: `{type(e).__name__}: {e}`\n\n"
+                "Check the setup guide: the Apps Script must be deployed as a Web app with "
+                "\"Execute as: Me\" and \"Who has access: Anyone\", and the URL + token in "
+                "Streamlit Secrets must match."
+            )
+            if st.button("🔄 Try again", type="primary"):
+                st.rerun()
+            st.stop()
+
+
+startup()
+push_changes()  # saves whatever the previous click changed
 
 
 # ============================================================
@@ -742,9 +981,18 @@ st.sidebar.markdown(f"# {APP_NAME}")
 st.sidebar.markdown('<div class="brand-caption">INVENTORY &amp; SALES</div>', unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Go to",
-    ["Dashboard", "Inventory", "Stock In / Out", "Record a Sale", "Sales & Payments", "Customers", "Cash on Hand", "Manage Items"],
+    ["Dashboard", "Inventory", "Stock In / Out", "Record a Sale", "Sales & Payments", "Customers", "Cash on Hand", "Manage Items", "Data & Backup"],
     label_visibility="collapsed",
 )
+
+_state = _sync_state()
+st.sidebar.markdown("---")
+if not sheets_configured():
+    st.sidebar.warning("⚠️ Not connected to Google Sheets — data is only saved on this server and can be lost. See **Data & Backup**.")
+elif _state["error"]:
+    st.sidebar.error("⚠️ Last save to Google Sheets failed — it will retry automatically. See **Data & Backup**.")
+elif _state["last_sync"]:
+    st.sidebar.caption(f"✅ Saved to Google Sheets · {_state['last_sync']:%b %d, %I:%M %p}")
 
 items_df = get_items_df()
 
@@ -796,7 +1044,7 @@ if page == "Dashboard":
             show = low_stock[["name", "current_stock", "low_stock_threshold", "unit_measure"]].rename(
                 columns={"name": "Item", "current_stock": "In Stock", "low_stock_threshold": "Threshold", "unit_measure": "Unit"}
             )
-            st.dataframe(show, hide_index=True, use_container_width=True)
+            st.dataframe(show, hide_index=True, width="stretch")
 
         st.subheader("Recent sales")
         if sales_df.empty:
@@ -805,7 +1053,7 @@ if page == "Dashboard":
             recent = sales_df.head(5)[["Date", "Customer", "Status", "Total", "Profit"]].copy()
             recent["Total"] = recent["Total"].map(peso)
             recent["Profit"] = recent["Profit"].map(peso)
-            st.dataframe(recent, hide_index=True, use_container_width=True)
+            st.dataframe(recent, hide_index=True, width="stretch")
 
 
 # ============================================================
@@ -844,7 +1092,7 @@ elif page == "Inventory":
         st.dataframe(
             display,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Cost": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f"),
                 "Selling Price": st.column_config.NumberColumn(format=f"{CURRENCY}%.2f"),
@@ -877,7 +1125,7 @@ elif page == "Stock In / Out":
                 movement_type = st.radio("Movement", ["In", "Out"], horizontal=True)
             with col2:
                 quantity = st.number_input("Quantity", min_value=0.0, step=1.0)
-                move_date = st.date_input("Date", value=date.today())
+                move_date = st.date_input("Date", value=today_ph())
             reason = st.text_input(
                 "Reason / note",
                 placeholder="e.g. Restocked from supplier / Sample given / Damaged bottle",
@@ -910,7 +1158,7 @@ elif page == "Stock In / Out":
         if moves.empty:
             st.caption("No stock movements yet.")
         else:
-            st.dataframe(moves.drop(columns=["id"]), hide_index=True, use_container_width=True)
+            st.dataframe(moves.drop(columns=["id"]), hide_index=True, width="stretch")
 
 
 # ============================================================
@@ -934,7 +1182,7 @@ elif page == "Record a Sale":
             else:
                 customer_name = pick
         with col2:
-            sale_date = st.date_input("Date", value=date.today())
+            sale_date = st.date_input("Date", value=today_ph())
         with col3:
             payment_status = st.radio("Payment status", ["Paid", "Unpaid"], horizontal=True)
 
@@ -969,7 +1217,7 @@ elif page == "Record a Sale":
                 "Quantity": st.column_config.NumberColumn(min_value=0, step=1),
             },
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             key=editor_key,
         )
 
@@ -980,7 +1228,7 @@ elif page == "Record a Sale":
             disabled=not bool(customer_name),
         )
 
-        chosen = edited[edited["Quantity"] > 0]
+        chosen = edited[edited["Quantity"].fillna(0) > 0]
         if not chosen.empty:
             preview_rows = []
             total = 0.0
@@ -1062,7 +1310,7 @@ elif page == "Sales & Payments":
         show = filtered.copy()
         show["Total"] = show["Total"].map(peso)
         show["Profit"] = show["Profit"].map(peso)
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        st.dataframe(show, hide_index=True, width="stretch")
 
         total_outstanding = filtered.loc[filtered["Status"] == "Unpaid", "Total"].sum()
         st.caption(f"Outstanding (in current view): {peso(total_outstanding)}")
@@ -1082,7 +1330,7 @@ elif page == "Sales & Payments":
                 ),
             )
             st.write("**Items in this sale:**")
-            st.dataframe(get_sale_line_items(pick), hide_index=True, use_container_width=True)
+            st.dataframe(get_sale_line_items(pick), hide_index=True, width="stretch")
             st.caption("Marking as Paid/Unpaid or deleting will automatically keep your Cash on Hand in sync.")
 
             b1, b2, b3 = st.columns(3)
@@ -1123,7 +1371,7 @@ elif page == "Customers":
         show["Paid"] = show["Paid"].map(peso)
         show["Outstanding"] = show["Outstanding"].map(peso)
         show["Last Purchase"] = show["Last Purchase"].fillna("—")
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        st.dataframe(show, hide_index=True, width="stretch")
 
         st.divider()
         pick = st.selectbox("View a customer's details", customers_df["name"].tolist())
@@ -1137,7 +1385,7 @@ elif page == "Customers":
         else:
             hist["Total"] = hist["Total"].map(peso)
             hist["Profit"] = hist["Profit"].map(peso)
-            st.dataframe(hist, hide_index=True, use_container_width=True)
+            st.dataframe(hist, hide_index=True, width="stretch")
 
         st.subheader(f"Saved prices for {pick}")
         prices_df = get_customer_prices_df(cust_id)
@@ -1148,7 +1396,7 @@ elif page == "Customers":
             with pcol1:
                 display_prices = prices_df[["Item", "Price"]].copy()
                 display_prices["Price"] = display_prices["Price"].map(peso)
-                st.dataframe(display_prices, hide_index=True, use_container_width=True)
+                st.dataframe(display_prices, hide_index=True, width="stretch")
             with pcol2:
                 remove_item = st.selectbox("Reset an item's price", prices_df["Item"].tolist(), key="reset_price_pick")
                 if st.button("Reset to default price"):
@@ -1179,7 +1427,7 @@ elif page == "Cash on Hand":
             new_amount = st.number_input("Beginning cash amount", min_value=0.0, step=100.0, value=float(beginning))
             new_date = st.date_input(
                 "As of date",
-                value=pd.to_datetime(start_date).date() if start_date else date.today(),
+                value=pd.to_datetime(start_date).date() if start_date else today_ph(),
             )
             if st.form_submit_button("Save", type="primary"):
                 set_beginning_cash(new_amount, new_date.isoformat())
@@ -1195,7 +1443,7 @@ elif page == "Cash on Hand":
         with cc2:
             amount = st.number_input("Amount", min_value=0.0, step=50.0)
         with cc3:
-            tx_date = st.date_input("Date", value=date.today())
+            tx_date = st.date_input("Date", value=today_ph())
         category = st.selectbox("Category", ["Owner Deposit", "Withdrawal", "Other Income", "Other Expense"])
         note = st.text_input("Note (optional)")
         if st.form_submit_button("Add entry", type="primary"):
@@ -1223,7 +1471,7 @@ elif page == "Cash on Hand":
         display_ledger = ledger.sort_values(["Date", "id"], ascending=False).drop(columns=["id"]).copy()
         display_ledger["Amount"] = display_ledger["Amount"].map(peso)
         display_ledger["Balance"] = display_ledger["Balance"].map(peso)
-        st.dataframe(display_ledger, hide_index=True, use_container_width=True)
+        st.dataframe(display_ledger, hide_index=True, width="stretch")
 
         csv = ledger.drop(columns=["id"]).to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Download cash ledger as CSV", csv, "cash_ledger.csv", "text/csv")
@@ -1255,7 +1503,6 @@ elif page == "Cash on Hand":
 elif page == "Manage Items":
     st.title("Manage Items")
 
-    # Show the result of a Danger-zone action (survives the page refresh)
     _flash = st.session_state.pop("_flash", None)
     if _flash:
         kind, msg = _flash
@@ -1298,7 +1545,7 @@ elif page == "Manage Items":
             row = items_df[items_df["name"] == selected_name].iloc[0]
 
             with st.form("edit_item_form"):
-                unit_measure = st.text_input("Unit of measure", value=row["unit_measure"])
+                unit_measure = st.text_input("Unit of measure", value=row["unit_measure"] or "")
                 c1, c2 = st.columns(2)
                 with c1:
                     unit_cost = st.number_input("Unit cost", min_value=0.0, step=1.0, value=float(row["unit_cost"]), format="%.2f")
@@ -1352,7 +1599,7 @@ elif page == "Manage Items":
         edited_bulk = st.data_editor(
             editable_df,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="bulk_items_editor",
             column_config={
                 "ID": st.column_config.NumberColumn(disabled=True, width="small"),
@@ -1380,7 +1627,7 @@ elif page == "Manage Items":
             rows_to_upsert = []
             for _, r in edited_bulk.iterrows():
                 name = str(r.get("Item", "") or "").strip()
-                if not name:
+                if not name or name.lower() == "nan":
                     continue
                 rows_to_upsert.append(
                     {
@@ -1439,8 +1686,9 @@ elif page == "Manage Items":
                     st.error(f"Missing column(s): {', '.join(sorted(missing))}. Please match the template from the download button above.")
                 else:
                     st.write("Preview:")
-                    st.dataframe(upload_df, hide_index=True, use_container_width=True)
+                    st.dataframe(upload_df, hide_index=True, width="stretch")
                     if st.button("✅ Confirm import", type="primary"):
+                        upload_df = upload_df.fillna({"Unit": "", "Cost": 0, "Selling Price": 0, "Current Stock": 0, "Threshold": 3})
                         rows = [
                             {
                                 "name": str(r["Item"]).strip(),
@@ -1451,6 +1699,7 @@ elif page == "Manage Items":
                                 "low_stock_threshold": r.get("Threshold", 3),
                             }
                             for _, r in upload_df.iterrows()
+                            if str(r["Item"]).strip() and str(r["Item"]).strip().lower() != "nan"
                         ]
                         added, updated = bulk_upsert_items(rows)
                         st.success(f"Import complete — {added} added, {updated} updated.")
@@ -1473,14 +1722,14 @@ elif page == "Manage Items":
         st.markdown("---")
         st.markdown(
             "**Wipe everything and start completely fresh** — permanently deletes ALL items, sales, "
-            "customers, stock history, and cash records. This cannot be undone."
+            "customers, stock history, and cash records (in the Google Sheet too). This cannot be undone "
+            "from the app — though the daily Drive backup will still have yesterday's copy."
         )
         st.text_input("Type DELETE (all caps) to confirm", key="wipe_confirm_text")
 
         def _do_full_wipe():
             if st.session_state.get("wipe_confirm_text", "").strip() == "DELETE":
                 full_wipe_all_data()
-                # Clear the confirm box and any half-finished grid edits
                 st.session_state["wipe_confirm_text"] = ""
                 st.session_state.pop("bulk_items_editor", None)
                 st.session_state["_flash"] = ("success", "Everything has been wiped. Add your items to get started again.")
@@ -1488,3 +1737,100 @@ elif page == "Manage Items":
                 st.session_state["_flash"] = ("error", "Type DELETE (all caps) in the box first to confirm.")
 
         st.button("🗑️ Wipe everything", key="do_full_wipe", on_click=_do_full_wipe)
+
+
+# ============================================================
+# DATA & BACKUP
+# ============================================================
+
+elif page == "Data & Backup":
+    st.title("Data & Backup")
+
+    _flash = st.session_state.pop("_flash_backup", None)
+    if _flash:
+        kind, msg = _flash
+        (st.success if kind == "success" else st.error)(msg)
+
+    st.subheader("Google Sheet")
+    if not sheets_configured():
+        st.warning(
+            "Not connected. Right now your data only lives on this server, and Streamlit Cloud "
+            "deletes it whenever the app restarts or you upload new code. Follow the SETUP GUIDE "
+            "to connect your Google Sheet (about 5 minutes, no coding)."
+        )
+    else:
+        st.markdown(f"Connected — every change is saved to [your Google Sheet]({SHEET_LINK}) automatically, "
+                    "and a full copy is kept each day in the **Aroma Legante Backups** folder in your Google Drive.")
+        if _state["error"]:
+            st.error(f"Last save failed (it will retry on your next click): `{_state['error']}`")
+            if st.button("🔁 Retry saving now"):
+                push_changes(force=True)
+                st.rerun()
+        elif _state["last_sync"]:
+            st.caption(f"Last saved: {_state['last_sync']:%B %d, %Y %I:%M:%S %p}")
+
+        st.caption(
+            "Edited the Google Sheet by hand? Click below to load those changes into the app. "
+            "(Best to make changes in the app itself — hand edits must keep the same columns.)"
+        )
+        if st.button("🔄 Reload from Google Sheet"):
+            try:
+                with _state["lock"]:
+                    _state["loaded"] = False
+                    load_from_sheet()
+                st.session_state["_flash_backup"] = ("success", "Reloaded everything from the Google Sheet.")
+            except Exception as e:
+                _state["loaded"] = True  # keep working from the local copy
+                st.session_state["_flash_backup"] = ("error", f"Couldn't reload: {type(e).__name__}: {e}")
+            st.rerun()
+
+    st.divider()
+    st.subheader("Full backup file")
+    st.caption(
+        "Downloads everything — items, sales, customers, saved prices, stock history and cash — "
+        "as one file. Keep a copy somewhere safe every now and then."
+    )
+    with open(DB_PATH, "rb") as f:
+        db_bytes = f.read()
+    st.download_button(
+        "⬇️ Download full backup",
+        db_bytes,
+        f"aroma_legante_backup_{today_ph().isoformat()}.db",
+        "application/octet-stream",
+    )
+
+    st.markdown("**Restore from a backup file**")
+    st.caption("⚠️ This replaces ALL current data (and the Google Sheet) with the contents of the backup file.")
+    _rk = st.session_state.setdefault("_restore_round", 0)
+    restore_file = st.file_uploader("Choose a backup file (.db)", type=["db", "sqlite", "sqlite3"], key=f"restore_upload_{_rk}")
+    if restore_file is not None:
+        if st.checkbox("I understand this replaces all current data", key=f"confirm_restore_{_rk}"):
+            if st.button("♻️ Restore this backup", type="primary"):
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+                tmp.write(restore_file.getvalue())
+                tmp.close()
+                try:
+                    chk = sqlite3.connect(tmp.name)
+                    tables = {r[0] for r in chk.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    chk.close()
+                    if not {"items", "sales", "sale_items"}.issubset(tables):
+                        raise ValueError("this doesn't look like an Aroma Legante backup file")
+                    with _state["lock"]:
+                        shutil.copyfile(tmp.name, DB_PATH)
+                        init_db()
+                        _state["allow_empty_items"] = True
+                        push_changes(force=True)
+                    if sheets_configured() and _state["error"]:
+                        st.session_state["_flash_backup"] = ("error", "Restored here, but saving to Google Sheets failed — it will retry.")
+                    else:
+                        st.session_state["_flash_backup"] = ("success", "Backup restored.")
+                except Exception as e:
+                    st.session_state["_flash_backup"] = ("error", f"Couldn't restore: {e}")
+                finally:
+                    os.remove(tmp.name)
+                st.session_state["_restore_round"] = _rk + 1
+                st.rerun()
+
+
+# Save anything changed during this page load
+push_changes()
